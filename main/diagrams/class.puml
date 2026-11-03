@@ -1,0 +1,68 @@
+@startuml
+!pragma layout smetana
+title Class Diagram - Classroom Quiz
+
+class Teacher
+class Student
+class Group {
+  groupName
+}
+class Activity {
+  phase
+  stateVersion
+}
+class Question {
+  questionNumber
+  prompt
+}
+class Round {
+  phase
+  openedAt
+  closedAt
+  nextOrder
+}
+class Submission {
+  answer
+  acceptedOrder
+}
+class GuidedNotesSheet {
+  worksheetName
+}
+class AnswerSlot {
+  questionNumber
+  mappingStatus
+  targetFingerprint
+}
+class ActivityEvent {
+  stateVersion
+  eventType
+}
+class WritebackJob {
+  status
+  attempt
+  claimedAt
+}
+
+Teacher "1" --> "0..*" Activity : controls
+Activity "1" *-- "1..*" Question : contains
+Activity "1" *-- "1..*" Round : runs
+Round "0..*" --> "1" Question : opens
+Student "0..*" --> "1" Group : joins as
+Group "1" --> "0..*" Submission : submits
+Round "1" --> "0..*" Submission : receives
+Question "1" --> "0..*" Submission : answered by
+GuidedNotesSheet "1" --> "1..*" Question : imports by question number
+Question "1" --> "1" AnswerSlot : maps dynamically
+Activity "1" --> "0..*" ActivityEvent : appends versioned events
+Round "1" --> "0..1" WritebackJob : writes after close
+
+note right of Submission
+  Rank each group by its first accepted answer.
+  The earliest accepted answer wins the question.
+end note
+note bottom of AnswerSlot
+  Resolve from the question number and sheet content.
+  Never depend on fixed cell coordinates.
+end note
+
+@enduml

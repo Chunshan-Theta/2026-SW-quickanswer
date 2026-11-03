@@ -1,0 +1,100 @@
+@startuml
+title Sequence Diagram - Quiz Round and Sheet Writeback
+
+actor Teacher
+participant "Teacher Portal" as TeacherUI
+participant "Next.js Route Handler" as API
+participant "Quiz Adjudication" as QuizFlow
+participant "Student Portal A" as StudentA
+participant "Student Portal B" as StudentB
+participant "Activity Phase Sync (SSE)" as ActivitySync
+participant "Private Redis" as Redis
+participant "Google Sheets Adapter" as SheetsAccess
+participant "Original Guided Notes" as Sheet
+participant "Writeback Worker" as Worker
+
+Teacher -> TeacherUI : Select Guided Notes sheet
+TeacherUI -> API : POST import
+API -> SheetsAccess : Read sheet via googleapis
+SheetsAccess -> Sheet : Scan questions and answer slots
+Sheet --> SheetsAccess : Question numbers, prompts, slots
+SheetsAccess --> API : Dynamic scan and mapping candidates
+API --> TeacherUI : Preview with opaque slot tokens
+TeacherUI -> TeacherUI : Validate count and mapping status
+
+opt Ambiguous answer-slot mapping
+  Teacher -> TeacherUI : Confirm candidate slot tokens
+  TeacherUI -> API : POST mapping confirmation
+  API -> SheetsAccess : Validate current scan tokens
+  SheetsAccess --> API : Unique confirmed mappings
+  API --> TeacherUI : Activity ready
+end
+
+alt Question count or mapping invalid
+  TeacherUI --> Teacher : Show error and block start
+else Questions valid
+  Teacher -> TeacherUI : Open current question
+  TeacherUI -> API : POST open
+  API -> QuizFlow : Validate teacher and transition
+  QuizFlow -> Redis : Lua: set open + XADD phase event
+  ActivitySync -> Redis : Per-instance XREAD event Stream
+  ActivitySync -> TeacherUI : Authorized phase.changed SSE
+  ActivitySync -> StudentA : Phase-only SSE
+  ActivitySync -> StudentB : Phase-only SSE
+
+  par Group A submits
+    StudentA -> API : POST answer (group from session)
+    API -> QuizFlow : Validate phase and group
+    QuizFlow -> Redis : Lua: accept once, sequence, winner, XADD
+    Redis --> QuizFlow : Accepted order
+    QuizFlow --> API : Submission receipt
+    API --> StudentA : Own receipt only
+  else Group B submits
+    StudentB -> API : POST answer (group from session)
+    API -> QuizFlow : Validate phase and group
+    QuizFlow -> Redis : Lua: accept once, sequence, winner, XADD
+    Redis --> QuizFlow : Accepted order
+    QuizFlow --> API : Submission receipt
+    API --> StudentB : Own receipt only
+  end
+
+  ActivitySync -> Redis : Read appended events
+  ActivitySync --> TeacherUI : Live statuses and order
+  note over StudentA, StudentB
+    While the round is open, students only see
+    their own status, never other groups' answers or ranks.
+  end note
+
+  Teacher -> TeacherUI : Close current question
+  TeacherUI -> API : POST close
+  API -> QuizFlow : Validate teacher and transition
+  QuizFlow -> Redis : Lua: close + finalize + XADD results
+  Redis --> QuizFlow : Immutable winner and result version
+  QuizFlow --> API : Final result
+  ActivitySync -> Redis : Read results.finalized event
+  ActivitySync --> TeacherUI : Live result and final order
+  ActivitySync --> StudentA : Closed phase and final results
+  ActivitySync --> StudentB : Closed phase and final results
+
+  opt Teacher writes results back
+    Teacher -> TeacherUI : Request writeback after close
+    TeacherUI -> API : POST writeback
+    API -> Redis : XADD idempotent writeback job
+    Redis --> API : Job queued
+    API --> TeacherUI : 202 queued
+    Worker -> Redis : XREADGROUP pending jobs
+    Worker -> SheetsAccess : Rescan, verify fingerprint, write RAW value
+    SheetsAccess -> Sheet : Resolve target dynamically and update
+    Sheet --> SheetsAccess : Write result
+    SheetsAccess --> Worker : Verified writeback
+    Worker -> Redis : XACK job and XADD status event
+    ActivitySync -> Redis : Read writeback.status event
+    ActivitySync --> TeacherUI : Final writeback status
+    note over Worker, Redis
+      On worker crash, XAUTOCLAIM reclaims
+      idle pending jobs; idempotency prevents duplicate writes.
+    end note
+  end
+end
+
+@enduml

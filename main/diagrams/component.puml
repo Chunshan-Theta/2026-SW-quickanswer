@@ -1,0 +1,45 @@
+@startuml
+!pragma layout smetana
+title Component Diagram - Classroom Quiz
+left to right direction
+@startuml
+!pragma layout smetana
+title Component Diagram - Classroom Quiz
+left to right direction
+
+actor Teacher
+actor Student
+
+package "Next.js App (Node.js runtime)" {
+	component "Teacher Portal" as TeacherClient
+	component "Student Portal" as StudentClient
+	component "API Routes / Application Services" as AppAPI
+	component "Activity Phase Sync (SSE)" as ActivitySync
+	component "Questions and Results" as QuizFlow
+	component "Google Sheets Adapter (googleapis)" as SheetsAccess
+	component "Writeback Worker" as WritebackWorker
+}
+
+database "Private Redis\n(server-only)" as ActivityData
+cloud "Original Guided Notes Sheet" as GuidedNotes
+
+Teacher --> TeacherClient : Import, control, review
+Student --> StudentClient : Join group, submit
+TeacherClient --> AppAPI : HTTPS actions
+StudentClient --> AppAPI : HTTPS join / submit
+AppAPI --> QuizFlow : Validate and execute commands
+AppAPI --> SheetsAccess : Import / enqueue writeback
+AppAPI --> ActivitySync : Open authenticated SSE
+QuizFlow --> ActivityData : Atomic state + event Stream
+ActivitySync --> ActivityData : Per-instance Stream reader
+WritebackWorker --> ActivityData : Read / ack retryable jobs
+SheetsAccess <--> GuidedNotes : Dynamic question/slot lookup and write
+ActivitySync --> TeacherClient : Authorized live status / results
+ActivitySync --> StudentClient : Phase / own receipt / post-close results
+
+note bottom of ActivityData
+	No browser connection to Redis.
+	State transitions and event XADD are atomic.
+end note
+
+@enduml
