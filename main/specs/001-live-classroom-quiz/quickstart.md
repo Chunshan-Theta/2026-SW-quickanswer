@@ -53,6 +53,7 @@
 ## 檢查命令
 
 - 單元測試：`pnpm test:unit`
+- API 合約測試：`pnpm test:contract`
 - Redis 整合測試：`pnpm test:integration`
 - 瀏覽器端到端測試：`pnpm test:e2e`
 - 靜態品質檢查：`pnpm lint && pnpm typecheck`

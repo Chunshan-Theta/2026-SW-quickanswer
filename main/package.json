@@ -1,0 +1,45 @@
+{
+  "name": "classroom-live-quiz",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@12.16.1",
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "worker:sheets-writeback": "tsx src/server/workers/sheets-writeback.ts",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "test:unit": "vitest run tests/unit",
+    "test:contract": "vitest run tests/contract",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
+    "test:load": "vitest run tests/load",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "googleapis": "190.0.0",
+    "lucide-react": "^1.72.0",
+    "next": "16.4.6",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "redis": "6.3.1",
+    "server-only": "^0.0.1",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "@types/node": "22.19.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "9.39.2",
+    "eslint-config-next": "16.4.6",
+    "prettier": "3.7.4",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vitest": "4.0.15"
+  }
+}

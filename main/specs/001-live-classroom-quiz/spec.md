@@ -121,6 +121,10 @@
 
 ## Diagram-First Artifacts
 
+規格階段以 PlantUML 描述系統組件、領域類別及教師與學生的互動時序；`.puml` 與
+由 PlantUML CLI 產生的對應 PNG 均存放於 `diagrams/`。後續規劃以這些圖作為架構與
+組件的主要藍圖；實作完成後須驗證程式碼與圖表一致。
+
 - [Component Diagram](../../diagrams/component.puml) · [PNG](../../diagrams/component.png)
 - [Class Diagram](../../diagrams/class.puml) · [PNG](../../diagrams/class.png)
 - [Sequence Diagram](../../diagrams/sequence.puml) · [PNG](../../diagrams/sequence.png)

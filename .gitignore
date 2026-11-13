@@ -1,0 +1,25 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+*.log
+
+# Local configuration and credentials
+.env*
+!main/.env.example
+!.env.example
+
+# Tooling and operating systems
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.idea/
+.vscode/
+
+# Test output
+playwright-report/
+test-results/

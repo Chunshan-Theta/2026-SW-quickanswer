@@ -1,13 +1,9 @@
 <!--
 Sync Impact Report
-Version change: unversioned template -> 1.0.0 (initial adoption)
-Modified principles:
-- Principle 1 -> I. Clear, Consistent Code
-- Principle 2 -> II. Simplicity and Explicit Design
-- Principle 3 -> III. Tests Define Behavior
-- Principle 4 -> IV. Risk-Based Test Coverage
-- Principle 5 -> V. Maintainable Change
-Added sections: Additional Constraints; Development Workflow
+Version change: 1.0.0 -> 1.1.0
+Modified principles: None
+Added principles: VI. Design-First with PlantUML
+Added sections: None
 Removed sections: None
 Follow-up TODO: Confirm the original ratification date.
 -->
@@ -50,6 +46,19 @@ or changing a public interface, contributors MUST check existing usage and expla
 impact in the change description. Rationale: explicit, bounded changes make future maintenance
 and review safer.
 
+### VI. Design-First with PlantUML
+圖表 MUST 作為 AI 規劃與開發者檢視設計的視覺化依據：
+
+- 規格制定階段（`speckit.specify`）：MUST 使用 PlantUML 語法建立組件圖
+	（Component Diagram）、類別圖（Class Diagram）及時序圖（Sequence Diagram），
+	並將 `.puml` 檔案儲存在 `./diagrams/`。
+- 產物生成：建立檔案後，MUST 使用 PlantUML CLI（例如
+	`java -jar plantuml.jar "./diagrams/*.puml"`）將所有 `.puml` 轉換為 PNG，
+	並將圖片儲存在同一目錄。
+- 規劃階段（`speckit.plan`）：MUST 以這些圖表作為產生應用程式架構與組件的主要藍圖。
+- 實作階段（`speckit.implement`）：程式碼生成完成後，MUST 執行驗證，確保最終
+	程式碼與圖表完全一致。
+
 ## Additional Constraints
 
 The project does not mandate a language, framework, or testing library through this constitution.
@@ -77,4 +86,4 @@ this constitution. When a principle conflicts with a repository-specific constra
 MUST document the conflict and resolve it through an approved amendment or an explicit exception
 in the change review.
 
-**Version**: 1.0.0 | **Ratified**: TODO(RATIFICATION_DATE): Original adoption date unknown | **Last Amended**: 2026-11-03
+**Version**: 1.1.0 | **Ratified**: TODO(RATIFICATION_DATE): Original adoption date unknown | **Last Amended**: 2026-11-13

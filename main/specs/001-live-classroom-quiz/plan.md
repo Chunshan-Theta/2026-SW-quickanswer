@@ -33,7 +33,7 @@
 **Gate before Phase 0: PASS**
 
 - Clear, Consistent Code: 採領域/adapter 邊界映射既有 Component Diagram 模組，責任單一且命名一致。
-- Simplicity and Explicit Design: 單一 Next.js 應用；SSE、Redis Pub/Sub 與 Redis Streams 分別對應必要的推播、跨 instance 通知與可恢復工作，不新增微服務或外部 queue。
+- Simplicity and Explicit Design: 單一 Next.js 應用；SSE 搭配 Redis Streams 支援推播、跨 instance 可重播事件與可恢復工作，不新增微服務或外部 queue。
 - Tests Define Behavior: 每個需求以單元、Redis/Sheets integration、API contract 與端到端驗收覆蓋。
 - Risk-Based Test Coverage: 競態、角色資料隔離、重連、Google 權限撤銷及回填重試均列為專項測試。
 - Maintainable Change: Redis、Sheets、SSE 與 UI 依模組隔離；API 與資料模型有獨立合約文件。
@@ -118,4 +118,4 @@ Submissions and close are linearized by Redis Lua scripts. The event Stream is a
 
 ## Complexity Tracking
 
-No constitution violations. Redis Lua, Pub/Sub, and Streams remain adapters inside the selected single-app architecture and each supports an explicit atomicity, cross-instance sync, or retry requirement.
+No constitution violations. Redis Lua and Streams remain adapters inside the selected single-app architecture and each supports an explicit atomicity, cross-instance replay, or retry requirement.

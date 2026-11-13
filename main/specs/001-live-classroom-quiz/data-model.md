@@ -8,7 +8,7 @@
 |---|---|---|
 | `activityId` | 隨機不可猜識別碼 | 建立後不可變 |
 | `teacherId` | 教師身份識別碼 | 必須等於已驗證 session 身份 |
-| `phase` | `draft`, `ready`, `active`, `completed` | 僅由教師授權的狀態操作轉換 |
+| `phase` | `draft`, `mapping_review`, `ready`, `active`, `completed` | 匯入若有歧義則進入 `mapping_review`；映射確認後轉為 `ready`；由教師授權操作推進 |
 | `stateVersion` | 活動範圍單調遞增整數 | 每筆狀態/事件變更原子遞增，供 SSE id、重播與快照版本比較 |
 | `spreadsheetId`, `sheetId` | Google spreadsheet 與工作表識別碼 | 伺服器持有，瀏覽器不得直接讀寫 Sheets API |
 | `questionIds` | 有序題目識別碼 | 必須與來源題數一致且題號唯一 |

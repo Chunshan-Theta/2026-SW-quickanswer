@@ -2,10 +2,6 @@
 !pragma layout smetana
 title Component Diagram - Classroom Quiz
 left to right direction
-@startuml
-!pragma layout smetana
-title Component Diagram - Classroom Quiz
-left to right direction
 
 actor Teacher
 actor Student
