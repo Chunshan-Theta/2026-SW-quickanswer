@@ -2,7 +2,8 @@ import Link from "next/link";
 import { ArrowLeft, Layers3, RadioTower } from "lucide-react";
 import { StudentJoinForm } from "@/components/student/join-form";
 
-export default function StudentJoinPage() {
+export default async function StudentJoinPage({ searchParams }: { searchParams: Promise<{ code?: string }> }) {
+  const { code = "" } = await searchParams;
   return (
     <main className="workspace">
       <aside className="rail" aria-label="主要導覽">
@@ -29,7 +30,7 @@ export default function StudentJoinPage() {
             </div>
             <span className="date-stamp">以組別為單位作答</span>
           </div>
-          <StudentJoinForm />
+          <StudentJoinForm initialCode={code} />
         </div>
       </section>
     </main>

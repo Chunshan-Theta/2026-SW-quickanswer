@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Check, CircleAlert, LoaderCircle, RadioTower } from "lucide-react";
+import { Check, RadioTower } from "lucide-react";
+import { StudentAnswerForm } from "@/components/student/answer-form";
+import type { ActivitySnapshot, ActivitySubmissionSnapshot } from "@/features/activities/domain/snapshot";
 
-type Submission = { groupId: string; answer: string; acceptedOrder: number; acceptedAt: string };
-type CurrentRound = { roundId: string; questionNumber: string; prompt: string; phase: "open" | "closed"; winnerGroupId: string | null; submissions: Submission[] } | null;
-export type Snapshot = { activityId: string; phase: string; stateVersion: number; currentRound: CurrentRound };
+type Submission = ActivitySubmissionSnapshot;
+export type Snapshot = ActivitySnapshot;
 
 export function StudentActivityRound({ activityId, groupId, initialSnapshot }: { activityId: string; groupId: string; initialSnapshot: Snapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
@@ -85,12 +86,7 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
             <h2>{round.prompt}</h2>
           </div>
           {round.phase === "open" && !ownSubmission && (
-            <form className="student-answer-form" onSubmit={submit}>
-              <label className="field-label" htmlFor="answer">小組答案</label>
-              <textarea id="answer" maxLength={4000} required rows={4} value={answer} onChange={(event) => setAnswer(event.target.value)} />
-              {error && <p className="form-message form-error" role="alert"><CircleAlert size={15} />{error}</p>}
-              <button className="primary-action" disabled={busy || !answer.trim()} type="submit">{busy ? <LoaderCircle className="spin" size={17} /> : <RadioTower size={16} />}送出答案</button>
-            </form>
+            <StudentAnswerForm answer={answer} busy={busy} error={error} onAnswerChange={setAnswer} onSubmit={submit} />
           )}
           {round.phase === "open" && ownSubmission && <p className="receipt-message" role="status"><Check size={17} />答案已送達，等待老師公布結果。</p>}
           {round.phase === "closed" && (

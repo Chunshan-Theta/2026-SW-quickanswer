@@ -12,5 +12,7 @@ export const redisKeys = {
   winner: (roundId: string) => `round:${roundId}:winner`,
   sheetBinding: (activityId: string) => `activity:${activityId}:sheet-binding`,
   writebackJobs: "writeback:jobs",
+  writebackJob: (jobId: string) => `writeback:job:${jobId}`,
+  writebackIdempotency: (activityId: string, roundId: string) => `writeback:idempotency:${activityId}:${roundId}`,
   session: (sessionId: string) => `session:${sessionId}`,
 } as const;

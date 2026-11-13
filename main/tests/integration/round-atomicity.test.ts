@@ -17,7 +17,10 @@ async function seedActivity() {
     stateVersion: 0,
     currentRoundId: null,
     groupNames: groups,
-    questions: [{ questionId: "question-1", questionNumber, prompt: "Race?", mappingStatus: "confirmed", selectedToken: "slot-1" }],
+    questions: [
+      { questionId: "question-1", questionNumber, prompt: "Race?", mappingStatus: "confirmed", selectedToken: "slot-1" },
+      { questionId: "question-2", questionNumber: "2", prompt: "Next?", mappingStatus: "confirmed", selectedToken: "slot-2" },
+    ],
     completedQuestionNumbers: [],
   }), { EX: 60 });
 }
@@ -47,6 +50,9 @@ describe("Redis round atomicity", () => {
     const winner = results.find((result) => result.winnerGroupId === result.groupId);
     expect(winner).toBeDefined();
     expect(winner?.acceptedOrder).toBe(1);
+    expect(await redis.ttl(redisKeys.submissions(round.roundId))).toBeGreaterThan(0);
+    expect(await redis.ttl(redisKeys.order(round.roundId))).toBeGreaterThan(0);
+    expect(await redis.ttl(redisKeys.winner(round.roundId))).toBeGreaterThan(0);
     await expect(submitAnswer(activityId, round.roundId, winner!.groupId, "duplicate")).rejects.toMatchObject({ status: 409 });
   });
 
@@ -69,5 +75,12 @@ describe("Redis round atomicity", () => {
     const result = await closeRound(activityId, round.roundId, teacherId);
     expect(result.winnerGroupId).toBeNull();
     expect(result.submissions).toEqual([]);
+  });
+
+  it("does not reopen a question after its round is complete", async () => {
+    const round = await openRound(activityId, teacherId, questionNumber);
+    await closeRound(activityId, round.roundId, teacherId);
+
+    await expect(openRound(activityId, teacherId, questionNumber)).rejects.toMatchObject({ status: 409 });
   });
 });

@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import Script from "next/script";
 import { ArrowRight, Check, LoaderCircle, RotateCw, Upload } from "lucide-react";
 
 type ImportQuestion = {
@@ -13,6 +14,29 @@ type ImportQuestion = {
 
 type ImportResult = { activityId: string; joinCode: string; phase: "ready" | "mapping_review"; questions: ImportQuestion[] };
 type ApiError = { error?: { message?: string } };
+type PickerResponse = { action: string; docs?: Array<{ id?: string; name?: string }> };
+
+interface PickerBuilder {
+  addView(view: string): PickerBuilder;
+  setOAuthToken(token: string): PickerBuilder;
+  setDeveloperKey(key: string): PickerBuilder;
+  setAppId(appId: string): PickerBuilder;
+  setCallback(callback: (response: PickerResponse) => void): PickerBuilder;
+  build(): { setVisible(visible: boolean): void };
+}
+
+declare global {
+  interface Window {
+    gapi?: { load(api: "picker", options: { callback: () => void; onerror: () => void }): void };
+    google?: {
+      picker?: {
+        PickerBuilder: new () => PickerBuilder;
+        ViewId: { SPREADSHEETS: string };
+        Action: { PICKED: string };
+      };
+    };
+  }
+}
 
 function spreadsheetIdFromInput(value: string): string {
   const match = value.match(/\/spreadsheets\/d\/([^/?#]+)/);
@@ -21,16 +45,68 @@ function spreadsheetIdFromInput(value: string): string {
 
 export function TeacherGuidedNotesImport() {
   const [spreadsheet, setSpreadsheet] = useState("");
+  const [spreadsheetName, setSpreadsheetName] = useState("");
   const [sheetId, setSheetId] = useState("0");
   const [groups, setGroups] = useState("A, B");
   const [result, setResult] = useState<ImportResult | null>(null);
   const [selections, setSelections] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [pickerLoaded, setPickerLoaded] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const pickerApiKey = process.env.NEXT_PUBLIC_GOOGLE_PICKER_API_KEY ?? "";
+  const pickerAppId = process.env.NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER ?? "";
+  const pickerConfigured = Boolean(pickerApiKey && pickerAppId);
+
+  async function selectSpreadsheet() {
+    setError("");
+    setNotice("");
+    setBusy(true);
+    try {
+      const response = await fetch("/api/auth/google/picker-token");
+      const body = await response.json() as { accessToken?: string } & ApiError;
+      if (!response.ok || !body.accessToken) throw new Error(body.error?.message ?? "無法取得 Google Picker 授權。");
+      if (!window.gapi || !pickerApiKey || !pickerAppId) throw new Error("Google Picker 尚未載入或未完成設定。");
+
+      await new Promise<void>((resolve, reject) => {
+        window.gapi!.load("picker", { callback: resolve, onerror: () => reject(new Error("無法載入 Google Picker。")) });
+      });
+      const pickerApi = window.google?.picker;
+      if (!pickerApi) throw new Error("Google Picker 尚未載入，請重試。");
+
+      new pickerApi.PickerBuilder()
+        .addView(pickerApi.ViewId.SPREADSHEETS)
+        .setOAuthToken(body.accessToken)
+        .setDeveloperKey(pickerApiKey)
+        .setAppId(pickerAppId)
+        .setCallback((pickerResponse) => {
+          if (pickerResponse.action !== pickerApi.Action.PICKED) return;
+          const file = pickerResponse.docs?.[0];
+          if (!file?.id) {
+            setError("Google Picker 未提供試算表識別碼，請重新選取。");
+            return;
+          }
+          setSpreadsheet(file.id);
+          setSpreadsheetName(file.name ?? "");
+          setResult(null);
+          setSelections({});
+          setNotice("已選取試算表，請確認工作表 gid 後匯入。");
+        })
+        .build()
+        .setVisible(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "無法開啟 Google Picker。");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submitImport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!spreadsheet) {
+      setError("請先使用 Google Picker 選取試算表。");
+      return;
+    }
     setBusy(true);
     setError("");
     setNotice("");
@@ -92,8 +168,21 @@ export function TeacherGuidedNotesImport() {
           <h2>來源工作表</h2>
           <span>需要編輯權限</span>
         </div>
-        <label className="field-label" htmlFor="spreadsheet">Google Sheets 網址或試算表 ID</label>
-        <input id="spreadsheet" autoComplete="url" placeholder="貼上試算表連結或 ID" required value={spreadsheet} onChange={(event) => setSpreadsheet(event.target.value)} />
+        <Script
+          src="https://apis.google.com/js/api.js"
+          strategy="afterInteractive"
+          onLoad={() => setPickerLoaded(true)}
+          onError={() => setError("無法載入 Google Picker，請檢查網路連線。")}
+        />
+        <label className="field-label" htmlFor="spreadsheet">已選取試算表</label>
+        <div className="import-form-row">
+          <input id="spreadsheet" readOnly placeholder="請從 Google 雲端硬碟選取試算表" value={spreadsheetName ? `${spreadsheetName} (${spreadsheet})` : spreadsheet} />
+          <button className="secondary-action" disabled={busy || !pickerConfigured || !pickerLoaded} type="button" onClick={selectSpreadsheet}>
+            {busy ? <LoaderCircle className="spin" size={17} /> : <Upload size={16} />}
+            從 Google 雲端硬碟選取
+          </button>
+        </div>
+        {!pickerConfigured && <p className="field-hint">尚未設定 Google Picker API 金鑰與 Cloud 專案編號，請聯絡管理員。</p>}
         <div className="import-form-row">
           <div>
             <label className="field-label" htmlFor="sheet-id">工作表 gid</label>
@@ -105,7 +194,7 @@ export function TeacherGuidedNotesImport() {
           </div>
         </div>
         <p className="field-hint">組別以逗號分隔。系統會依題號掃描題目與答案空格，不使用固定儲存格位置。</p>
-        <button className="primary-action" disabled={busy} type="submit">
+        <button className="primary-action" disabled={busy || !spreadsheet} type="submit">
           {busy ? <LoaderCircle className="spin" size={17} /> : <Upload size={16} />}
           {busy ? "正在讀取" : "匯入並預覽"}
         </button>

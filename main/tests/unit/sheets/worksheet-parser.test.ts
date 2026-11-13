@@ -77,6 +77,33 @@ describe("parseWorksheetGrid", () => {
     ]));
   });
 
+  it("fails closed when a question-like row has an unsupported format", () => {
+    const parsed = parseWorksheetGrid({
+      sheetId: 2,
+      title: "Unsupported Question",
+      rows: [{ values: [cell("1. Prompt"), cell("{{answer:1}}"), cell("2 Prompt"), cell("{{answer:2}}")] }],
+    });
+
+    expect(parsed.valid).toBe(false);
+    expect(parsed.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "unrecognized_question_row" }),
+    ]));
+  });
+
+  it("compares the answer-marker source count with parsed question count", () => {
+    const parsed = parseWorksheetGrid({
+      sheetId: 2,
+      title: "Question Count Mismatch",
+      rows: [{ values: [cell("1. First"), cell("{{answer:1}}"), cell("2. Second")] }],
+    });
+
+    expect(parsed.valid).toBe(false);
+    expect(parsed.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "missing_answer_slot", questionNumber: "2" }),
+      expect.objectContaining({ code: "question_count_mismatch" }),
+    ]));
+  });
+
   it("preserves a worksheet with more than 200 consecutively numbered questions", () => {
     const rows = Array.from({ length: 205 }, (_, index) => ({
       values: [cell(`${index + 1}. Prompt ${index + 1}`), cell(`{{answer:${index + 1}}}`)],

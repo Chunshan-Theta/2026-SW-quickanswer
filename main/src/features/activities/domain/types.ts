@@ -44,6 +44,6 @@ export interface ActivityEvent<T = Record<string, unknown>> {
   activityId: string;
   stateVersion: number;
   type: string;
-  occurredAt: number;
+  occurredAt: string;
   data: T;
 }

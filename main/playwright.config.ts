@@ -5,7 +5,7 @@ export default defineConfig({
   fullyParallel: true,
   reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL: "http://localhost:3000",
     trace: "retain-on-failure",
   },
   projects: [
@@ -15,9 +15,13 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "pnpm dev -- --hostname 127.0.0.1",
-    url: "http://127.0.0.1:3000",
+    command: "pnpm dev",
+    url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: {
+      NEXT_PUBLIC_GOOGLE_PICKER_API_KEY: "playwright-test-api-key",
+      NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER: "123456789",
+    },
   },
 });

@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { Check, Clipboard, LoaderCircle, RadioTower, Square } from "lucide-react";
 
 type Submission = { groupId: string; answer: string; acceptedOrder: number; acceptedAt: string };
-type CurrentRound = { roundId: string; questionNumber: string; prompt: string; phase: "open" | "closed"; winnerGroupId: string | null; submissions: Submission[] } | null;
+type WritebackJob = { jobId: string; status: string; attempt: number; errorCode?: string | null };
+type CurrentRound = { roundId: string; questionNumber: string; prompt: string; phase: "open" | "closed"; winnerGroupId: string | null; submissions: Submission[]; writebackJob?: WritebackJob } | null;
 type ActivityView = { activityId: string; joinCode: string; phase: string; groupNames: string[]; completedQuestionNumbers: string[]; questions: Array<{ questionNumber: string; prompt: string; mappingStatus: string }>; currentRound: CurrentRound };
-type ApiResult = { error?: { message?: string }; roundId?: string; questionNumber?: string; prompt?: string; phase?: "open" | "closed"; winnerGroupId?: string | null; submissions?: Submission[]; stateVersion?: number };
+type ApiResult = { error?: { message?: string }; roundId?: string; questionNumber?: string; prompt?: string; phase?: "open" | "closed"; winnerGroupId?: string | null; submissions?: Submission[]; stateVersion?: number; jobId?: string; status?: string; attempt?: number };
 
 export function TeacherRoundControl({ activity: initialActivity }: { activity: ActivityView }) {
   const router = useRouter();
@@ -49,6 +50,13 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
           currentRound: { ...current.currentRound, phase: "closed", winnerGroupId: event.data.winnerGroupId, submissions: event.data.submissions },
         };
       });
+    });
+    stream.addEventListener("writeback.status", (message) => {
+      const event = JSON.parse((message as MessageEvent<string>).data) as { data: WritebackJob & { roundId: string } };
+      setActivity((current) => current.currentRound?.roundId !== event.data.roundId ? current : ({
+        ...current,
+        currentRound: { ...current.currentRound, writebackJob: event.data },
+      }));
     });
     return () => stream.close();
   }, [activity.activityId]);
@@ -107,6 +115,33 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
     }
   }
 
+  async function queueWriteback() {
+    const round = activity.currentRound;
+    if (!round || round.phase !== "closed" || !round.winnerGroupId || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/activities/${activity.activityId}/rounds/${round.roundId}/writeback`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ requestId: crypto.randomUUID() }),
+      });
+      const body = await response.json() as ApiResult;
+      if (!response.ok) throw new Error(body.error?.message ?? "無法排入答案回填。");
+      setActivity((current) => current.currentRound?.roundId !== round.roundId ? current : ({
+        ...current,
+        currentRound: {
+          ...current.currentRound,
+          writebackJob: { jobId: body.jobId!, status: body.status!, attempt: body.attempt ?? 0 },
+        },
+      }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "目前無法排入答案回填。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const round = activity.currentRound;
   const remainingQuestions = activity.questions.filter((question) => question.mappingStatus === "confirmed" && !activity.completedQuestionNumbers.includes(question.questionNumber));
 
@@ -140,7 +175,22 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
           </div>
         )}
         {error && <p className="form-message form-error" role="alert">{error}</p>}
-        {round?.phase === "closed" && <p className="form-message form-notice" role="status">{round.winnerGroupId ? `搶答成功：${round.winnerGroupId}` : "本題無人作答。"}</p>}
+        {round?.phase === "closed" && (
+          <section className="final-result" aria-labelledby="teacher-result-heading">
+            <div className="section-heading"><h3 id="teacher-result-heading">最終結果</h3><span>{round.winnerGroupId ? `搶答成功：${round.winnerGroupId}` : "本題無人作答。"}</span></div>
+            <ol className="result-list">
+              {round.submissions.map((submission) => <li key={submission.groupId}><span>{submission.acceptedOrder.toString().padStart(2, "0")}</span><strong>{submission.groupId}</strong><p>{submission.answer}</p></li>)}
+            </ol>
+            {round.winnerGroupId && (
+              <div className="writeback-status">
+                <button className="secondary-action" disabled={busy || ["queued", "running", "retryable", "succeeded", "failed"].includes(round.writebackJob?.status ?? "")} type="button" onClick={queueWriteback}>
+                  {round.writebackJob?.status === "succeeded" ? "已回填至工作表" : round.writebackJob?.status === "failed" ? "回填失敗" : round.writebackJob?.status ? "回填處理中" : "回填得獎答案"}
+                </button>
+                {round.writebackJob && <p className="form-message form-notice" role="status">回填狀態：{round.writebackJob.status}{round.writebackJob.errorCode ? ` · ${round.writebackJob.errorCode}` : ""}</p>}
+              </div>
+            )}
+          </section>
+        )}
       </section>
     </div>
   );

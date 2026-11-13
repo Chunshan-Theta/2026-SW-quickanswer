@@ -1,0 +1,226 @@
+import { createHmac } from "node:crypto";
+import { createClient, type RedisClientType } from "redis";
+import { expect, test, type Browser, type Page } from "@playwright/test";
+
+const activityId = "e2e-writeback-activity";
+const roundId = "e2e-writeback-round";
+const teacherId = "e2e-writeback-teacher";
+const secret = process.env.SESSION_SECRET ?? "e2e-session-secret-with-at-least-32-bytes";
+let redis: RedisClientType;
+
+function sessionCookie(subject = teacherId, role = "teacher"): string {
+  const payload = Buffer.from(JSON.stringify({
+    sub: subject,
+    role,
+    exp: Math.floor(Date.now() / 1000) + 3600,
+  })).toString("base64url");
+  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+async function seedReadyActivity(id: string, code: string) {
+  await redis.set(`activity:${id}:meta`, JSON.stringify({
+    activityId: id,
+    teacherId,
+    spreadsheetId: "test-spreadsheet",
+    sheetId: 0,
+    joinCode: code,
+    phase: "ready",
+    stateVersion: 0,
+    currentRoundId: null,
+    fingerprint: "test-fingerprint",
+    groupNames: ["Blue", "Red"],
+    questions: [{
+      questionNumber: "1",
+      prompt: "Name the process.",
+      mappingStatus: "confirmed",
+      selectedToken: "test-answer-slot",
+      candidates: [{ token: "test-answer-slot", location: { sheetId: 0, rowIndex: 0, columnIndex: 1 } }],
+    }],
+  }), { EX: 60 });
+  await redis.set(`activity:join:${code}`, id, { EX: 60 });
+}
+
+async function clearActivity(id: string, code: string) {
+  const rawActivity = await redis.get(`activity:${id}:meta`);
+  const roundId = rawActivity ? (JSON.parse(rawActivity) as { currentRoundId?: string }).currentRoundId : undefined;
+  const keys = [`activity:${id}:meta`, `activity:${id}:events`, `activity:join:${code}`];
+  if (roundId) keys.push(`round:${roundId}:state`, `round:${roundId}:submissions`, `round:${roundId}:order`, `round:${roundId}:winner`);
+  await redis.del(keys);
+}
+
+async function addTeacherCookie(page: Page) {
+  await page.context().addCookies([{
+    name: "classroom_session",
+    value: sessionCookie(),
+    domain: "localhost",
+    path: "/",
+    httpOnly: true,
+    sameSite: "Lax",
+  }]);
+}
+
+async function joinGroup(browser: Browser, code: string, group: string) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(`/join/${code}`);
+  await page.getByRole("button", { name: "查詢" }).click();
+  await expect(page.getByText("活動可加入")).toBeVisible();
+  await page.getByLabel("選擇組別").selectOption(group);
+  await page.getByLabel("顯示名稱").fill(`${group} Student`);
+  await page.getByRole("button", { name: "加入組別" }).click();
+  await expect(page).toHaveURL(/\/student\/activity$/);
+  return { context, page };
+}
+
+test.beforeAll(async () => {
+  process.env.REDIS_URL ??= "redis://127.0.0.1:6379";
+  redis = createClient({ url: process.env.REDIS_URL });
+  redis.on("error", () => undefined);
+  await redis.connect();
+});
+
+test.afterAll(async () => {
+  await redis?.del([
+    `activity:${activityId}:meta`,
+    `activity:${activityId}:events`,
+    `round:${roundId}:state`,
+    `round:${roundId}:submissions`,
+    `round:${roundId}:order`,
+    `round:${roundId}:winner`,
+  ]);
+  await redis?.quit();
+});
+
+test("teacher queues the winning answer writeback and sees its status", async ({ page, context }) => {
+  await redis.del([
+    `activity:${activityId}:meta`,
+    `activity:${activityId}:events`,
+    `round:${roundId}:state`,
+    `round:${roundId}:submissions`,
+    `round:${roundId}:order`,
+    `round:${roundId}:winner`,
+  ]);
+  await redis.set(`activity:${activityId}:meta`, JSON.stringify({
+    activityId,
+    teacherId,
+    joinCode: "ABC234",
+    phase: "completed",
+    stateVersion: 4,
+    currentRoundId: roundId,
+    groupNames: ["Blue", "Red"],
+    completedQuestionNumbers: ["1"],
+    questions: [{ questionNumber: "1", prompt: "Name the process.", mappingStatus: "confirmed" }],
+  }), { EX: 60 });
+  await redis.hSet(`round:${roundId}:state`, {
+    activityId,
+    phase: "closed",
+    questionNumber: "1",
+    prompt: "Name the process.",
+    winnerGroupId: "Blue",
+    stateVersion: "4",
+  });
+  await redis.hSet(`round:${roundId}:submissions`, {
+    Blue: JSON.stringify({ groupId: "Blue", answer: "Photosynthesis", acceptedOrder: 1, acceptedAt: "t1" }),
+    Red: JSON.stringify({ groupId: "Red", answer: "Respiration", acceptedOrder: 2, acceptedAt: "t2" }),
+  });
+  await context.addCookies([{
+    name: "classroom_session",
+    value: sessionCookie(),
+    domain: "localhost",
+    path: "/",
+    httpOnly: true,
+    sameSite: "Lax",
+  }]);
+  await page.route(`**/api/activities/${activityId}/rounds/${roundId}/writeback`, async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ jobId: `${activityId}:${roundId}`, status: "queued" }) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto(`/teacher/activities/${activityId}`);
+  await expect(page.getByText("Photosynthesis")).toBeVisible();
+  await page.getByRole("button", { name: "回填得獎答案" }).click();
+  await expect(page.getByText("回填狀態：queued")).toBeVisible();
+});
+
+test("teacher and students open, answer, close, and see role-filtered results", async ({ browser }) => {
+  const id = "e2e-round-activity";
+  const code = "DEF234";
+  await clearActivity(id, code);
+  await seedReadyActivity(id, code);
+  const teacherContext = await browser.newContext();
+  const teacherPage = await teacherContext.newPage();
+  let blue: Awaited<ReturnType<typeof joinGroup>> | undefined;
+  let red: Awaited<ReturnType<typeof joinGroup>> | undefined;
+  try {
+    await addTeacherCookie(teacherPage);
+    await teacherPage.goto(`/teacher/activities/${id}`);
+    await expect(teacherPage.getByText(code)).toBeVisible();
+    await teacherPage.getByRole("button", { name: "開啟搶答" }).click();
+    await expect(teacherPage.getByRole("button", { name: "結束本題" })).toBeVisible();
+
+    blue = await joinGroup(browser, code, "Blue");
+    await expect(blue.page.getByLabel("小組答案")).toBeVisible();
+    await blue.page.getByLabel("小組答案").fill("Photosynthesis");
+    await blue.page.getByRole("button", { name: "送出答案" }).click();
+    await expect(blue.page.getByText("答案已送達")).toBeVisible();
+
+    red = await joinGroup(browser, code, "Red");
+    await expect(red.page.getByLabel("小組答案")).toBeVisible();
+    await expect(red.page.getByText("Photosynthesis")).toHaveCount(0);
+    await expect(red.page.getByText("Blue", { exact: true })).toHaveCount(0);
+    await red.page.getByLabel("小組答案").fill("Respiration");
+    await red.page.getByRole("button", { name: "送出答案" }).click();
+    await expect(red.page.getByText("答案已送達")).toBeVisible();
+    await expect(teacherPage.getByText("Photosynthesis")).toBeVisible();
+    await expect(teacherPage.getByText("Respiration")).toBeVisible();
+
+    await teacherPage.getByRole("button", { name: "結束本題" }).click();
+    await expect(teacherPage.getByText("搶答成功：Blue")).toBeVisible();
+    await expect(red.page.getByText("最終結果")).toBeVisible();
+    await expect(red.page.getByText("Photosynthesis")).toBeVisible();
+    await expect(red.page.getByText("Respiration")).toBeVisible();
+    await red.page.reload();
+    await expect(red.page.getByText("最終結果")).toBeVisible();
+    await expect(red.page.getByText("Photosynthesis")).toBeVisible();
+    await expect(red.page.getByText("Respiration")).toBeVisible();
+  } finally {
+    await Promise.all([blue?.context.close(), red?.context.close(), teacherContext.close()]);
+    await clearActivity(id, code);
+  }
+});
+
+test("teacher selects a spreadsheet and previews the imported questions", async ({ page }) => {
+  await addTeacherCookie(page);
+  await page.route("https://apis.google.com/js/api.js", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/javascript",
+    body: `window.gapi={load:(_name,options)=>options.callback()};function PickerBuilder(){this.callback=()=>{}}PickerBuilder.prototype.addView=function(){return this};PickerBuilder.prototype.setOAuthToken=function(){return this};PickerBuilder.prototype.setDeveloperKey=function(){return this};PickerBuilder.prototype.setAppId=function(){return this};PickerBuilder.prototype.setCallback=function(callback){this.callback=callback;return this};PickerBuilder.prototype.build=function(){const callback=this.callback;return {setVisible:visible=>visible&&callback({action:"picked",docs:[{id:"selected-spreadsheet",name:"Guided Notes"}]})}};window.google={picker:{PickerBuilder,ViewId:{SPREADSHEETS:"spreadsheets"},Action:{PICKED:"picked"}}};`,
+  }));
+  await page.route("**/api/auth/google/picker-token", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ accessToken: "picker-access-token" }),
+  }));
+  await page.route("**/api/activities/import", (route) => route.fulfill({
+    status: 201,
+    contentType: "application/json",
+    body: JSON.stringify({
+      activityId: "e2e-import-activity",
+      joinCode: "GHJ234",
+      phase: "ready",
+      questions: [{ questionNumber: "1", prompt: "Name the process.", mappingStatus: "confirmed", candidateSlotTokens: [] }],
+    }),
+  }));
+
+  await page.goto("/teacher/import");
+  await page.getByRole("button", { name: "從 Google 雲端硬碟選取" }).click();
+  await expect(page.getByLabel("已選取試算表")).toHaveValue(/Guided Notes/);
+  await page.getByRole("button", { name: "匯入並預覽" }).click();
+  await expect(page.getByRole("heading", { name: "題目預覽" })).toBeVisible();
+  await expect(page.getByText("1 題 · 已確認")).toBeVisible();
+  await expect(page.getByRole("link", { name: "進入教師控制台" })).toHaveAttribute("href", "/teacher/activities/e2e-import-activity");
+});

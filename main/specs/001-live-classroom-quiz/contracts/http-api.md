@@ -46,7 +46,7 @@ Student join-code flow. Server validates the activity and group, binds the resul
 
 ### `POST /api/activities/{activityId}/rounds/{roundId}/open`
 
-Teacher-only. Requires a ready activity and a confirmed question mapping. Idempotent open requests return the current phase; conflicting state returns `409`.
+Teacher-only. Requires a ready or active activity and a confirmed, not-yet-completed question mapping. A question cannot be reopened after close; conflicting state returns `409`.
 
 ### `POST /api/activities/{activityId}/rounds/{roundId}/submissions`
 
@@ -76,10 +76,14 @@ Authenticated SSE stream. Server derives actor, role, activity and group from th
 - `results.finalized`: all members, emitted only after the round closes.
 - `writeback.status`: teacher-only.
 
-On connect/reconnect, the server starts an independent Redis Stream reader before reading a snapshot, buffers concurrent events, sends a role-filtered snapshot, then sends only events with newer `stateVersion`. A teacher snapshot may include live group status/order. An open-round student snapshot contains only their own submission and phase; it MUST NOT serialize the unfiltered round hash or other groups' data. A closed-round student snapshot may include final group results. `Last-Event-ID` replays retained events through the same role projection; if the id has expired, send the latest filtered snapshot. Heartbeats keep the HTTP stream alive. `Cache-Control: no-cache, no-transform` and streaming-compatible deployment are required.
+On connect/reconnect, the server starts an independent Redis Stream reader before recovery and buffers concurrent events. A fresh connection receives a role-filtered snapshot; a reconnect with a retained `Last-Event-ID` receives later retained events through the same role projection. If the event id is invalid, trimmed, or separated by a version gap, the server sends a fresh filtered snapshot instead. In either path, only contiguous events newer than the recovered state are sent; a later detected gap triggers another snapshot. A teacher snapshot may include live group status/order. An open-round student snapshot contains only their own submission and phase; it MUST NOT serialize the unfiltered round hash or other groups' data. A closed-round student snapshot may include final group results. Heartbeats keep the HTTP stream alive. `Cache-Control: no-cache, no-transform` and streaming-compatible deployment are required.
 
 ### `POST /api/activities/{activityId}/rounds/{roundId}/writeback`
 
 Teacher-only and allowed only after close. Enqueues the immutable winner result in a Redis Stream; returns `202` with `{ "jobId": "...", "status": "queued" }`. Repeated requests use the same idempotency key and do not enqueue duplicate writes.
 
 The worker re-scans the sheet and compares the dynamic SheetBinding fingerprint immediately before writing; a stale/ambiguous mapping or revoked Google permission fails closed with a conflict/permission status. Transient errors are retryable. Consumer recovery claims idle pending jobs with `XAUTOCLAIM`; ack only after verified completion, and the idempotency key prevents duplicate writes after a crash. Google Sheets does not provide arbitrary cell compare-and-swap, so source edits during the final scan/batch-update interval are an explicit operational limitation; tests must verify detected pre-write changes are rejected. The browser never communicates with Redis or Google Sheets credentials directly.
+
+### `GET /api/activities/{activityId}/rounds/{roundId}/writeback`
+
+Teacher-only. Returns the persisted job id, status, attempt count, and safe error code for the activity's idempotent `activityId:roundId` writeback job. Returns `404` when no job has been queued.

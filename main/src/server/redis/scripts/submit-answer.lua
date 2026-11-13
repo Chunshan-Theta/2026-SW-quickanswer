@@ -18,6 +18,9 @@ local winnerGroupId = redis.call("GET", KEYS[5])
 activity.stateVersion = (activity.stateVersion or 0) + 1
 redis.call("SET", KEYS[1], cjson.encode(activity), "KEEPTTL")
 redis.call("HSET", KEYS[2], "stateVersion", tostring(activity.stateVersion))
+for _, key in ipairs({ KEYS[2], KEYS[3], KEYS[4], KEYS[5] }) do
+  redis.call("EXPIRE", key, tonumber(ARGV[5]))
+end
 local payload = cjson.encode({ type = "submission.accepted", activityId = activity.activityId, stateVersion = activity.stateVersion, occurredAt = ARGV[4], data = { roundId = ARGV[1], groupId = ARGV[2], answer = ARGV[3], acceptedOrder = acceptedOrder, acceptedAt = ARGV[4], winnerGroupId = winnerGroupId } })
-redis.call("XADD", KEYS[6], "*", "stateVersion", tostring(activity.stateVersion), "payload", payload)
+redis.call("XADD", KEYS[6], "MAXLEN", "~", "1000", "*", "stateVersion", tostring(activity.stateVersion), "payload", payload)
 return cjson.encode({ groupId = ARGV[2], acceptedOrder = acceptedOrder, acceptedAt = ARGV[4], winnerGroupId = winnerGroupId, stateVersion = activity.stateVersion })

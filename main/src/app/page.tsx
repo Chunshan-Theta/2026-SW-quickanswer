@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowDownLeft, ArrowUpRight, CircleHelp, Layers3, RadioTower } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Layers3, RadioTower } from "lucide-react";
 
 export default function HomePage() {
   return (
@@ -9,16 +9,13 @@ export default function HomePage() {
           q<span>.</span>
         </Link>
         <div className="rail-rule" />
-        <Link aria-label="教師工作區" className="rail-link rail-link-active" href="/teacher">
+        <Link aria-label="教師工作區" className="rail-link rail-link-active" href="/teacher/import">
           <Layers3 size={19} strokeWidth={1.8} />
         </Link>
         <Link aria-label="學生加入活動" className="rail-link" href="/join">
           <RadioTower size={19} strokeWidth={1.8} />
         </Link>
         <div className="rail-spacer" />
-        <Link aria-label="使用說明" className="rail-link" href="/help">
-          <CircleHelp size={19} strokeWidth={1.8} />
-        </Link>
         <div className="avatar" aria-label="課堂搶答">課</div>
       </aside>
 
@@ -27,7 +24,7 @@ export default function HomePage() {
           <Link className="wordmark" href="/">quickanswer</Link>
           <span className="topbar-context">課堂工作區</span>
           <div className="topbar-spacer" />
-          <span className="connection"><i />系統就緒</span>
+          <span className="connection">選擇角色以開始</span>
         </header>
 
         <div className="content-wrap">
@@ -74,7 +71,7 @@ export default function HomePage() {
           <section aria-labelledby="activity-heading" className="activity-section">
             <div className="section-heading">
               <h2 id="activity-heading">最近活動</h2>
-              <Link href="/teacher">查看教師工作區 <ArrowUpRight size={14} /></Link>
+              <Link href="/teacher/import">前往教師工作區 <ArrowUpRight size={14} /></Link>
             </div>
             <div className="activity-list activity-empty">
               <span className="empty-mark">—</span>

@@ -16,6 +16,7 @@
     "test:unit": "vitest run tests/unit",
     "test:contract": "vitest run tests/contract",
     "test:integration": "vitest run tests/integration",
+    "test:security": "vitest run tests/security",
     "test:e2e": "playwright test",
     "test:load": "vitest run tests/load",
     "typecheck": "tsc --noEmit"

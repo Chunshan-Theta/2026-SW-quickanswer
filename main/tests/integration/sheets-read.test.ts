@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getGoogleTokens: vi.fn(),
   saveGoogleTokens: vi.fn(),
   getSheet: vi.fn(),
+  batchUpdate: vi.fn(),
   refreshAccessToken: false,
   authInstances: [] as Array<{ credentials: Record<string, unknown>; setCredentials: (value: Record<string, unknown>) => void; getAccessToken: () => Promise<{ token: string }> }>,
 }));
@@ -22,11 +23,11 @@ vi.mock("googleapis", () => ({
         }
       },
     },
-    sheets: () => ({ spreadsheets: { get: mocks.getSheet } }),
+    sheets: () => ({ spreadsheets: { get: mocks.getSheet, values: { batchUpdate: mocks.batchUpdate } } }),
   },
 }));
 
-import { readWorksheet } from "@/features/sheets/google-sheets.adapter";
+import { readWorksheet, writeWorksheetAnswers } from "@/features/sheets/google-sheets.adapter";
 
 function worksheetResponse() {
   return {
@@ -82,5 +83,25 @@ describe("Google Sheets adapter", () => {
 
     await expect(readWorksheet("teacher-1", "spreadsheet-1", 17)).rejects.toMatchObject({ status: 503 });
     expect(mocks.getSheet).not.toHaveBeenCalled();
+  });
+
+  it("writes dynamically resolved targets as RAW values", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "client");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "secret");
+    vi.stubEnv("GOOGLE_REDIRECT_URI", "http://localhost/callback");
+    mocks.getGoogleTokens.mockResolvedValue({ access_token: "token" });
+    mocks.batchUpdate.mockResolvedValue({ data: { totalUpdatedCells: 1 } });
+
+    await writeWorksheetAnswers("teacher-1", "spreadsheet-1", "Teacher's Notes", [
+      { location: { sheetId: 17, rowIndex: 5, columnIndex: 26 }, answer: "=1+1" },
+    ]);
+
+    expect(mocks.batchUpdate).toHaveBeenCalledWith({
+      spreadsheetId: "spreadsheet-1",
+      requestBody: {
+        valueInputOption: "RAW",
+        data: [{ range: "'Teacher''s Notes'!AA6", values: [["=1+1"]] }],
+      },
+    });
   });
 });

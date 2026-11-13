@@ -30,6 +30,6 @@ for _, key in ipairs({ KEYS[3], KEYS[4], KEYS[5] }) do redis.call("EXPIRE", key,
 local eventFields = cjson.encode({ type = "results.finalized", activityId = activity.activityId, stateVersion = activity.stateVersion, occurredAt = ARGV[3] })
 local eventData = cjson.encode({ roundId = ARGV[2], questionNumber = questionNumber, phase = "closed", winnerGroupId = winnerGroupId or cjson.null })
 local payload = string.sub(eventFields, 1, -2) .. ',"data":' .. string.sub(eventData, 1, -2) .. ',"submissions":' .. submissionsJson .. '}}'
-redis.call("XADD", KEYS[6], "*", "stateVersion", tostring(activity.stateVersion), "payload", payload)
+redis.call("XADD", KEYS[6], "MAXLEN", "~", "1000", "*", "stateVersion", tostring(activity.stateVersion), "payload", payload)
 local resultFields = cjson.encode({ phase = "closed", roundId = ARGV[2], questionNumber = questionNumber, winnerGroupId = winnerGroupId or cjson.null, stateVersion = activity.stateVersion })
 return string.sub(resultFields, 1, -2) .. ',"submissions":' .. submissionsJson .. '}'

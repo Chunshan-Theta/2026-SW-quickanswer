@@ -28,6 +28,8 @@ export interface WorksheetIssue {
   code:
     | "duplicate_question_number"
     | "missing_question_number"
+    | "unrecognized_question_row"
+    | "question_count_mismatch"
     | "missing_answer_slot"
     | "ambiguous_answer_slot"
     | "orphan_answer_slot"
@@ -51,6 +53,7 @@ export interface WorksheetParseResult {
 }
 
 const questionPattern = /^(?:q(?:uestion)?\s*)?(\d+)\s*(?:[.)、:：]|題[.、:：]?)\s*(.+)$/i;
+const questionLikePattern = /^(?:q(?:uestion)?(?:\s*\d+)?\b|\d+\s*(?:[.)、:：]|題)|\d+\s+\S)/i;
 const answerMarkerPattern = /\{\{\s*(?:answer|blank)\s*:\s*(\d+)\s*\}\}|\[\[\s*answer\s*:\s*(\d+)\s*\]\]/gi;
 
 function cellText(cell: WorksheetCell): string {
@@ -88,6 +91,11 @@ export function parseWorksheetGrid(grid: WorksheetGrid): WorksheetParseResult {
           prompts.set(questionNumber, {
             prompt: promptMatch[2].trim(),
             occurrences: (existing?.occurrences ?? 0) + 1,
+          });
+        } else if (questionLikePattern.test(text)) {
+          issues.push({
+            code: "unrecognized_question_row",
+            message: `無法辨識題目格式：「${text}」。`,
           });
         }
 
@@ -135,6 +143,14 @@ export function parseWorksheetGrid(grid: WorksheetGrid): WorksheetParseResult {
         message: `答案空格標記 ${questionNumber} 沒有對應題目。`,
       });
     }
+  }
+
+  const sourceQuestionCount = new Set(markers.map(({ questionNumber }) => questionNumber)).size;
+  if (sourceQuestionCount !== prompts.size) {
+    issues.push({
+      code: "question_count_mismatch",
+      message: `題目數 ${prompts.size} 與答案空格標記數 ${sourceQuestionCount} 不一致。`,
+    });
   }
 
   const questions = [...prompts.entries()]

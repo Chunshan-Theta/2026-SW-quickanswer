@@ -22,7 +22,7 @@ function decodeResult<T>(raw: string): T {
   const result = JSON.parse(raw) as T & { error?: string };
   if (result.error) {
     const status = result.error === "NOT_FOUND" ? 404 : result.error === "FORBIDDEN" ? 403 : result.error === "GROUP_NOT_FOUND" || result.error === "QUESTION_NOT_FOUND" || result.error === "MAPPING_NOT_CONFIRMED" ? 422 : 409;
-    const message = result.error === "NOT_FOUND" ? "找不到課堂活動。" : result.error === "FORBIDDEN" ? "沒有權限執行此操作。" : result.error === "GROUP_NOT_FOUND" ? "組別不存在。" : result.error === "QUESTION_NOT_FOUND" ? "題目不存在。" : result.error === "MAPPING_NOT_CONFIRMED" ? "題目答案空格尚未確認。" : result.error === "DUPLICATE_SUBMISSION" ? "此組已提交答案。" : result.error === "ROUND_ALREADY_OPEN" ? "目前已有題目正在搶答。" : "此搶答回合已結束。";
+    const message = result.error === "NOT_FOUND" ? "找不到課堂活動。" : result.error === "FORBIDDEN" ? "沒有權限執行此操作。" : result.error === "GROUP_NOT_FOUND" ? "組別不存在。" : result.error === "QUESTION_NOT_FOUND" ? "題目不存在。" : result.error === "QUESTION_ALREADY_COMPLETED" ? "此題已完成，無法再次開啟。" : result.error === "MAPPING_NOT_CONFIRMED" ? "題目答案空格尚未確認。" : result.error === "DUPLICATE_SUBMISSION" ? "此組已提交答案。" : result.error === "ROUND_ALREADY_OPEN" ? "目前已有題目正在搶答。" : "此搶答回合已結束。";
     const code = status === 404 ? errorCodes.notFound : status === 403 ? errorCodes.forbidden : status === 422 ? errorCodes.invalidInput : errorCodes.conflict;
     throw new AppError(status, code, message);
   }
@@ -43,7 +43,7 @@ export async function submitAnswer(activityId: string, roundId: string, groupId:
   const redis = await getRedisClient();
   const raw = await redis.eval(await script("submit-answer.lua"), {
     keys: [redisKeys.activity(activityId), redisKeys.round(roundId), redisKeys.submissions(roundId), redisKeys.order(roundId), redisKeys.winner(roundId), redisKeys.activityEvents(activityId)],
-    arguments: [roundId, groupId, answer.trim(), new Date().toISOString()],
+    arguments: [roundId, groupId, answer.trim(), new Date().toISOString(), String(ttlSeconds())],
   });
   return decodeResult<{ groupId: string; acceptedOrder: number; acceptedAt: string; winnerGroupId: string; stateVersion: number }>(String(raw));
 }

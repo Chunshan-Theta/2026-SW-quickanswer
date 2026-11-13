@@ -1,16 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ generateAuthUrl: vi.fn(), getToken: vi.fn(), verifyIdToken: vi.fn(), saveGoogleTokens: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  generateAuthUrl: vi.fn(),
+  getToken: vi.fn(),
+  verifyIdToken: vi.fn(),
+  getAccessToken: vi.fn(),
+  getGoogleTokens: vi.fn(),
+  saveGoogleTokens: vi.fn(),
+}));
 
 vi.mock("googleapis", () => ({ google: { auth: { OAuth2: class {
+  credentials: Record<string, unknown> = {};
   generateAuthUrl = mocks.generateAuthUrl;
   getToken = mocks.getToken;
   verifyIdToken = mocks.verifyIdToken;
+  setCredentials(credentials: Record<string, unknown>) { this.credentials = credentials; }
+  getAccessToken = mocks.getAccessToken;
 } } } }));
-vi.mock("@/server/auth/google-token-store", () => ({ saveGoogleTokens: mocks.saveGoogleTokens }));
+vi.mock("@/server/auth/google-token-store", () => ({ getGoogleTokens: mocks.getGoogleTokens, saveGoogleTokens: mocks.saveGoogleTokens }));
 
 import { GET as start } from "@/app/api/auth/google/start/route";
 import { GET as callback } from "@/app/api/auth/google/callback/route";
+import { GET as pickerToken } from "@/app/api/auth/google/picker-token/route";
+import { signSession } from "@/server/auth/session";
 
 describe("Google OAuth", () => {
   beforeEach(() => {
@@ -21,13 +33,18 @@ describe("Google OAuth", () => {
     vi.stubEnv("GOOGLE_REDIRECT_URI", "http://localhost:3000/api/auth/google/callback");
     vi.stubEnv("APP_BASE_URL", "http://localhost:3000");
     mocks.generateAuthUrl.mockReturnValue("https://accounts.google.com/o/oauth2/auth");
+    mocks.getAccessToken.mockResolvedValue({ token: "short-lived-access-token" });
   });
 
   it("sets a protected state cookie and sends a PKCE challenge", async () => {
     const response = await start();
     expect(response.status).toBe(307);
     expect(response.headers.get("set-cookie")).toContain("HttpOnly");
-    expect(mocks.generateAuthUrl).toHaveBeenCalledWith(expect.objectContaining({ code_challenge_method: "S256", state: expect.any(String) }));
+    expect(mocks.generateAuthUrl).toHaveBeenCalledWith(expect.objectContaining({
+      code_challenge_method: "S256",
+      scope: ["openid", "https://www.googleapis.com/auth/drive.file"],
+      state: expect.any(String),
+    }));
   });
 
   it("rejects callbacks without the matching state cookie", async () => {
@@ -69,5 +86,30 @@ describe("Google OAuth", () => {
     expect(response.status).toBe(400);
     expect(mocks.getToken).not.toHaveBeenCalled();
     expect(mocks.saveGoogleTokens).not.toHaveBeenCalled();
+  });
+
+  it("returns only a teacher's short-lived Picker access token", async () => {
+    mocks.getGoogleTokens.mockResolvedValue({ access_token: "expired-token", refresh_token: "server-only-refresh-token" });
+    const cookie = signSession({ sub: "teacher-id", role: "teacher" });
+    const response = await pickerToken(new Request("http://localhost:3000/api/auth/google/picker-token", {
+      headers: { cookie: `classroom_session=${cookie}` },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    expect(body).toEqual({ accessToken: "short-lived-access-token" });
+    expect(mocks.getGoogleTokens).toHaveBeenCalledWith("teacher-id");
+    expect(JSON.stringify(body)).not.toContain("refresh_token");
+  });
+
+  it("denies Picker access tokens to student sessions", async () => {
+    const cookie = signSession({ sub: "student-id", role: "student", activityId: "activity-1", groupId: "Blue" });
+    const response = await pickerToken(new Request("http://localhost:3000/api/auth/google/picker-token", {
+      headers: { cookie: `classroom_session=${cookie}` },
+    }));
+
+    expect(response.status).toBe(403);
+    expect(mocks.getGoogleTokens).not.toHaveBeenCalled();
   });
 });

@@ -7,9 +7,9 @@ import { ArrowRight, Check, LoaderCircle, RadioTower } from "lucide-react";
 type Lookup = { activityId: string; phase: string; groupNames: string[] };
 type ApiError = { error?: { message?: string } };
 
-export function StudentJoinForm() {
+export function StudentJoinForm({ initialCode = "" }: { initialCode?: string }) {
   const router = useRouter();
-  const [joinCode, setJoinCode] = useState("");
+  const [joinCode, setJoinCode] = useState(initialCode.toUpperCase());
   const [lookup, setLookup] = useState<Lookup | null>(null);
   const [groupId, setGroupId] = useState("");
   const [displayName, setDisplayName] = useState("");

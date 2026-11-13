@@ -7,7 +7,7 @@ const event = {
   activityId: "activity-1",
   stateVersion: 4,
   type: "submission.accepted",
-  occurredAt: 100,
+  occurredAt: "2026-11-13T00:00:00.000Z",
   data: { groupId: "Red", answer: "private answer", acceptedOrder: 1, winnerGroupId: "Red" },
 };
 

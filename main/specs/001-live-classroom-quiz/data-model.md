@@ -83,6 +83,9 @@
 | `attempt` | 重試次數 | 指數退避；權限/映射永久錯誤不自動無限重試 |
 | `errorCode` | 可呈現的錯誤分類或空值 | 不儲存 OAuth token 或敏感回應內容 |
 | `claimedAt` | worker 領取時間 | worker 在處理中斷線後，由 `XAUTOCLAIM` 回收逾時 pending 工作 |
+| `expectedPostFingerprint` | 預期回填後掃描指紋 | 寫入前持久化；若 worker 在 Sheets 寫入後、Redis ack 前中斷，可辨識已完成的相同寫入而避免重複更新 |
+
+回填冪等索引以 `activityId:roundId` 唯一定位，重複請求回傳原工作而不建立第二個 Stream entry。重試採有上限的指數退避；權限、過期映射及其他永久錯誤會標記失敗並 ack，不會無限重試。
 
 ## ActivityEvent
 

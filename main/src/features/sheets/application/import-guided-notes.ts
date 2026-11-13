@@ -1,6 +1,7 @@
 import "server-only";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { parseWorksheetGrid, type CellLocation, type WorksheetGrid } from "@/features/sheets/domain/worksheet-parser";
+import { randomBytes, randomUUID } from "node:crypto";
+import { parseWorksheetGrid, type CellLocation } from "@/features/sheets/domain/worksheet-parser";
+import { worksheetFingerprint } from "@/features/sheets/application/worksheet-fingerprint";
 import { readWorksheet } from "@/features/sheets/google-sheets.adapter";
 import type { ActivityImportInput, MappingConfirmationInput } from "@/lib/validation/schemas";
 import { errorCodes } from "@/lib/errors/error-codes";
@@ -11,10 +12,6 @@ import { redisKeys } from "@/server/redis/keyspace";
 type Candidate = { token: string; location: CellLocation };
 type ImportedQuestion = { questionNumber: string; prompt: string; mappingStatus: "confirmed" | "ambiguous" | "missing"; candidates: Candidate[]; selectedToken: string | null };
 export type ImportedActivity = { activityId: string; teacherId: string; spreadsheetId: string; sheetId: number; joinCode: string; phase: "ready" | "mapping_review"; fingerprint: string; groupNames: string[]; questions: ImportedQuestion[] };
-
-function fingerprint(grid: WorksheetGrid): string {
-  return createHash("sha256").update(JSON.stringify(grid)).digest("hex");
-}
 
 function publicActivity(activity: ImportedActivity) {
   return { activityId: activity.activityId, joinCode: activity.joinCode, phase: activity.phase, questions: activity.questions.map((question) => ({
@@ -40,7 +37,7 @@ export async function importGuidedNotes(teacherId: string, input: ActivityImport
   for (let attempt = 0; attempt < 8; attempt += 1) {
     joinCode = Array.from(randomBytes(6), (byte) => alphabet[byte % alphabet.length]).join("");
     const activityId = randomUUID();
-    activity = { activityId, teacherId, spreadsheetId: input.spreadsheetId, sheetId: input.sheetId, joinCode, phase: questions.every((question) => question.selectedToken) ? "ready" : "mapping_review", fingerprint: fingerprint(grid), groupNames: input.groupNames, questions };
+    activity = { activityId, teacherId, spreadsheetId: input.spreadsheetId, sheetId: input.sheetId, joinCode, phase: questions.every((question) => question.selectedToken) ? "ready" : "mapping_review", fingerprint: worksheetFingerprint(grid), groupNames: input.groupNames, questions };
     const reserved = await redis.set(redisKeys.joinCode(joinCode), activityId, { EX: ttl, NX: true });
     if (!reserved) continue;
     try {
@@ -62,7 +59,7 @@ export async function confirmMappings(teacherId: string, activityId: string, inp
   const activity = JSON.parse(original) as ImportedActivity;
   if (activity.teacherId !== teacherId) throw new AppError(403, errorCodes.forbidden, "沒有權限修改此活動。");
   const grid = await readWorksheet(teacherId, activity.spreadsheetId, activity.sheetId);
-  if (fingerprint(grid) !== activity.fingerprint) throw new AppError(409, errorCodes.conflict, "工作表已變更，請重新匯入。");
+  if (worksheetFingerprint(grid) !== activity.fingerprint) throw new AppError(409, errorCodes.conflict, "工作表已變更，請重新匯入。");
   const selected = new Set<string>();
   for (const resolution of input.resolutions) {
     const question = activity.questions.find((item) => item.questionNumber === resolution.questionNumber);
