@@ -1,0 +1,98 @@
+@startuml
+!pragma layout smetana
+title Class Diagram - 002 Worksheet Parsing & Question Groups
+
+class WorksheetGrid {
+  sheetId
+  title
+  rows
+}
+class MergeRange {
+  startRow
+  endRow
+  startColumn
+  endColumn
+}
+class SheetTab {
+  sheetId
+  title
+  index
+}
+class WorksheetLayout {
+  kind : table | marker
+  headerRow
+  numberColumn
+  promptColumn
+  answerColumn
+}
+class ParsedQuestion {
+  questionNumber
+  prompt
+  kind : single | group
+  firstRow
+  lastRow
+  mappingStatus
+}
+class ParsedBlank {
+  label
+  prompt
+  answerSlot
+  candidateSlots
+  mappingStatus
+}
+class WorksheetIssue {
+  code
+  questionNumber
+  rowNumber
+  message
+}
+class StructureSnapshot {
+  fingerprint
+}
+class ImportedQuestion {
+  questionNumber
+  prompt
+  kind
+  mappingStatus
+}
+class ImportedBlank {
+  label
+  prompt
+  candidates
+  selectedToken
+}
+class Submission {
+  answers[]
+  answer (display)
+  acceptedOrder
+}
+class WritebackJob {
+  answers[]
+  status
+  attempt
+}
+
+WorksheetGrid "1" *-- "0..*" MergeRange : merges
+SheetTab "1" --> "1" WorksheetGrid : read as
+WorksheetGrid "1" --> "1" WorksheetLayout : detected
+WorksheetLayout "1" --> "0..*" ParsedQuestion : yields
+ParsedQuestion "1" *-- "1..*" ParsedBlank : blanks
+WorksheetLayout "1" --> "0..*" WorksheetIssue : reports
+ParsedQuestion "1..*" --> "1" StructureSnapshot : summarised by
+ParsedQuestion ..> ImportedQuestion : persisted as
+ImportedQuestion "1" *-- "1..*" ImportedBlank : blanks
+ImportedQuestion "1" --> "0..*" Submission : answered by
+Submission "1" --> "1..*" ImportedBlank : answers[i] fills blanks[i]
+WritebackJob "1" --> "1..*" ImportedBlank : writes label + answers[i]
+
+note right of ParsedQuestion
+  single: exactly one blank.
+  group : rows sharing a merged / repeated
+  question number, or unnumbered rows directly
+  below with a sub-prompt or "（n）" label.
+end note
+note bottom of StructureSnapshot
+  Excludes answer-cell values; equal snapshots
+  mean the question structure is unchanged.
+end note
+@enduml

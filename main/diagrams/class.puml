@@ -14,6 +14,7 @@ class Activity {
 class Question {
   questionNumber
   prompt
+  kind : single | group
 }
 class Round {
   phase
@@ -22,16 +23,17 @@ class Round {
   nextOrder
 }
 class Submission {
-  answer
+  answers[]
   acceptedOrder
 }
 class GuidedNotesSheet {
   worksheetName
+  structureFingerprint
 }
 class AnswerSlot {
-  questionNumber
+  label
+  prompt
   mappingStatus
-  targetFingerprint
 }
 class ActivityEvent {
   stateVersion
@@ -52,7 +54,7 @@ Group "1" --> "0..*" Submission : submits
 Round "1" --> "0..*" Submission : receives
 Question "1" --> "0..*" Submission : answered by
 GuidedNotesSheet "1" --> "1..*" Question : imports by question number
-Question "1" --> "1" AnswerSlot : maps dynamically
+Question "1" *-- "1..*" AnswerSlot : maps dynamically (one per sub-question)
 Activity "1" --> "0..*" ActivityEvent : appends versioned events
 Round "1" --> "0..1" WritebackJob : writes after close
 
@@ -61,8 +63,10 @@ note right of Submission
   The earliest accepted answer wins the question.
 end note
 note bottom of AnswerSlot
-  Resolve from the question number and sheet content.
+  Resolve from the header row, question number and sheet content.
   Never depend on fixed cell coordinates.
+  A group question has one slot per sub-question; a submission
+  carries one answer per slot and must fill all of them.
 end note
 
 @enduml

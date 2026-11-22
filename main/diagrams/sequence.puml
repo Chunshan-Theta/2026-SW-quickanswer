@@ -14,9 +14,9 @@ participant "Original Guided Notes" as Sheet
 participant "Writeback Worker" as Worker
 
 Teacher -> TeacherUI : Select Guided Notes sheet
-TeacherUI -> API : POST import
+TeacherUI -> API : POST import (spreadsheet + tab chosen by name)
 API -> SheetsAccess : Read sheet via googleapis
-SheetsAccess -> Sheet : Scan questions and answer slots
+SheetsAccess -> Sheet : Scan grid + merges (header row, numbers, answer slots)
 Sheet --> SheetsAccess : Question numbers, prompts, slots
 SheetsAccess --> API : Dynamic scan and mapping candidates
 API --> TeacherUI : Preview with opaque slot tokens
@@ -43,14 +43,14 @@ else Questions valid
   ActivitySync -> StudentB : Phase-only SSE
 
   par Group A submits
-    StudentA -> API : POST answer (group from session)
+    StudentA -> API : POST answers[] (group from session)
     API -> QuizFlow : Validate phase and group
     QuizFlow -> Redis : Lua: accept once, sequence, winner, XADD
     Redis --> QuizFlow : Accepted order
     QuizFlow --> API : Submission receipt
     API --> StudentA : Own receipt only
   else Group B submits
-    StudentB -> API : POST answer (group from session)
+    StudentB -> API : POST answers[] (group from session)
     API -> QuizFlow : Validate phase and group
     QuizFlow -> Redis : Lua: accept once, sequence, winner, XADD
     Redis --> QuizFlow : Accepted order
@@ -83,7 +83,7 @@ else Questions valid
     Redis --> API : Job queued
     API --> TeacherUI : 202 queued
     Worker -> Redis : XREADGROUP pending jobs
-    Worker -> SheetsAccess : Rescan, verify fingerprint, write RAW value
+    Worker -> SheetsAccess : Rescan, verify structure snapshot, write RAW values
     SheetsAccess -> Sheet : Resolve target dynamically and update
     Sheet --> SheetsAccess : Write result
     SheetsAccess --> Worker : Verified writeback
