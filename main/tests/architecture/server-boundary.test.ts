@@ -105,7 +105,9 @@ describe("browser/server boundary", () => {
       [resolve(sourceRoot, "server/credentials.ts"), "export const secret = true;"],
     ]);
 
-    expect(findClientBoundaryViolations(sources, sourceRoot)).toEqual(expect.arrayContaining([
+    // Normalise Windows path separators so the assertion is platform independent.
+    const violations = findClientBoundaryViolations(sources, sourceRoot).map((violation) => violation.replaceAll("\\", "/"));
+    expect(violations).toEqual(expect.arrayContaining([
       expect.stringContaining("server-only"),
       expect.stringContaining("@/server/credentials"),
       expect.stringContaining("server/credentials.ts"),
