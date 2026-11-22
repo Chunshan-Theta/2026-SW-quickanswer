@@ -10,7 +10,7 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
-    "worker:sheets-writeback": "tsx src/server/workers/sheets-writeback.ts",
+    "worker:sheets-writeback": "tsx --conditions=react-server --env-file-if-exists=.env.local src/server/workers/sheets-writeback.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
     "test:unit": "vitest run tests/unit",
