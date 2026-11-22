@@ -1,78 +1,77 @@
 import "server-only";
-import { parseWorksheetGrid, type CellLocation, type WorksheetGrid } from "@/features/sheets/domain/worksheet-parser";
+import { cellTextAt, parseWorksheetGrid, type CellLocation } from "@/features/sheets/domain/worksheet-parser";
 import type { ImportedActivity } from "@/features/sheets/application/import-guided-notes";
-import { worksheetFingerprint } from "@/features/sheets/application/worksheet-fingerprint";
+import { structureFingerprint } from "@/features/sheets/application/worksheet-fingerprint";
 import { writeWorksheetAnswers, readWorksheet } from "@/features/sheets/google-sheets.adapter";
 import { errorCodes } from "@/lib/errors/error-codes";
 import { AppError } from "@/server/http/errors";
 
-export type PreparedWriteback =
-  | { alreadyWritten: true; expectedFingerprint: string }
-  | { alreadyWritten: false; expectedFingerprint: string; sheetTitle: string; location: CellLocation };
+export type WritebackTarget = { location: CellLocation; value: string };
 
-function updatedGrid(grid: WorksheetGrid, location: CellLocation, answer: string): WorksheetGrid {
-  const rows = grid.rows.map((row) => ({ ...row, values: row.values?.map((cell) => ({ ...cell })) }));
-  const cell = rows[location.rowIndex]?.values?.[location.columnIndex];
-  if (!cell) throw new AppError(409, errorCodes.conflict, "答案空格已無法確認，請重新匯入工作表。");
-  rows[location.rowIndex].values![location.columnIndex] = {
-    ...cell,
-    formattedValue: answer,
-    userEnteredValue: { ...cell.userEnteredValue, stringValue: answer, formulaValue: undefined, numberValue: undefined },
-  };
-  return { ...grid, rows };
+export type PreparedWriteback =
+  | { alreadyWritten: true; targets: WritebackTarget[] }
+  | { alreadyWritten: false; sheetTitle: string; targets: WritebackTarget[] };
+
+function sameLocation(left: CellLocation, right: CellLocation): boolean {
+  return left.sheetId === right.sheetId && left.rowIndex === right.rowIndex && left.columnIndex === right.columnIndex;
 }
 
+/**
+ * Resolves the answer cells for one question against a fresh scan.
+ * Fails closed when the question structure changed since import; answer-cell contents
+ * (including earlier writebacks) are not part of the structure and never block a writeback.
+ */
 export async function prepareGuidedNotesWriteback(
   activity: ImportedActivity,
   questionNumber: string,
-  answer: string,
-  expectedAfterFingerprint?: string,
+  answers: string[],
 ): Promise<PreparedWriteback> {
   const grid = await readWorksheet(activity.teacherId, activity.spreadsheetId, activity.sheetId);
-  const currentFingerprint = worksheetFingerprint(grid);
-  if (expectedAfterFingerprint && currentFingerprint === expectedAfterFingerprint) {
-    return { alreadyWritten: true, expectedFingerprint: expectedAfterFingerprint };
-  }
-  if (currentFingerprint !== activity.fingerprint) {
-    throw new AppError(409, errorCodes.conflict, "工作表自匯入後已變更，未執行回填。");
+  const parsed = parseWorksheetGrid(grid);
+  if (structureFingerprint(parsed) !== activity.structureFingerprint) {
+    throw new AppError(409, errorCodes.conflict, "工作表題目結構自匯入後已變更，未執行回填，請重新匯入。");
   }
 
   const question = activity.questions.find((item) => item.questionNumber === questionNumber);
-  if (!question || question.mappingStatus !== "confirmed" || !question.selectedToken) {
+  if (!question || question.mappingStatus !== "confirmed") {
     throw new AppError(409, errorCodes.conflict, "題目答案空格尚未確認，未執行回填。");
   }
-  const candidate = question.candidates.find((item) => item.token === question.selectedToken);
-  const parsedQuestion = parseWorksheetGrid(grid).questions.find((item) => item.questionNumber === questionNumber);
-  if (
-    !candidate ||
-    !parsedQuestion?.candidateSlots.some((location) =>
-      location.sheetId === candidate.location.sheetId &&
-      location.rowIndex === candidate.location.rowIndex &&
-      location.columnIndex === candidate.location.columnIndex
-    )
-  ) {
-    throw new AppError(409, errorCodes.conflict, "無法唯一確認題號對應的答案空格，未執行回填。");
+  if (question.blanks.length !== answers.length) {
+    throw new AppError(409, errorCodes.conflict, "答案數量與子題數不符，未執行回填。");
   }
 
-  const expectedFingerprint = worksheetFingerprint(updatedGrid(grid, candidate.location, answer));
-  return {
-    alreadyWritten: false,
-    expectedFingerprint,
-    sheetTitle: grid.title,
-    location: candidate.location,
-  };
+  const parsedQuestion = parsed.questions.find((item) => item.questionNumber === questionNumber);
+  const targets = question.blanks.map((blank, index): WritebackTarget => {
+    const candidate = blank.candidates.find((item) => item.token === blank.selectedToken);
+    if (!candidate) throw new AppError(409, errorCodes.conflict, "題目答案空格尚未確認，未執行回填。");
+    const value = `${blank.label ?? ""}${answers[index]}`;
+    // Marker layout: the marker is replaced by the answer, so accept either the marker or a finished write.
+    const stillResolvable = parsedQuestion?.blanks[index]?.candidateSlots.some((location) => sameLocation(location, candidate.location));
+    if (!stillResolvable && cellTextAt(grid, candidate.location) !== value) {
+      throw new AppError(409, errorCodes.conflict, "無法唯一確認題號對應的答案空格，未執行回填。");
+    }
+    return { location: candidate.location, value };
+  });
+
+  if (targets.every((target) => cellTextAt(grid, target.location) === target.value)) {
+    return { alreadyWritten: true, targets };
+  }
+  return { alreadyWritten: false, sheetTitle: grid.title, targets };
 }
 
 export async function applyGuidedNotesWriteback(
   activity: ImportedActivity,
   prepared: Extract<PreparedWriteback, { alreadyWritten: false }>,
-  answer: string,
 ): Promise<void> {
-  await writeWorksheetAnswers(activity.teacherId, activity.spreadsheetId, prepared.sheetTitle, [
-    { location: prepared.location, answer },
-  ]);
+  await writeWorksheetAnswers(
+    activity.teacherId,
+    activity.spreadsheetId,
+    prepared.sheetTitle,
+    prepared.targets.map((target) => ({ location: target.location, answer: target.value })),
+  );
   const verified = await readWorksheet(activity.teacherId, activity.spreadsheetId, activity.sheetId);
-  if (worksheetFingerprint(verified) !== prepared.expectedFingerprint) {
+  const written = prepared.targets.every((target) => cellTextAt(verified, target.location) === target.value);
+  if (!written || structureFingerprint(parseWorksheetGrid(verified)) !== activity.structureFingerprint) {
     throw new AppError(409, errorCodes.conflict, "回填後工作表與預期不符，請檢查原工作表。");
   }
 }

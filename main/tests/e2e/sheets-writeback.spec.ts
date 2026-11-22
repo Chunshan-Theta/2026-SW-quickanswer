@@ -28,14 +28,30 @@ async function seedReadyActivity(id: string, code: string) {
     phase: "ready",
     stateVersion: 0,
     currentRoundId: null,
-    fingerprint: "test-fingerprint",
+    layout: "table",
+    structureFingerprint: "test-structure",
     groupNames: ["Blue", "Red"],
     questions: [{
       questionNumber: "1",
       prompt: "Name the process.",
+      kind: "single",
       mappingStatus: "confirmed",
-      selectedToken: "test-answer-slot",
-      candidates: [{ token: "test-answer-slot", location: { sheetId: 0, rowIndex: 0, columnIndex: 1 } }],
+      blanks: [{
+        label: null,
+        prompt: "Name the process.",
+        mappingStatus: "confirmed",
+        selectedToken: "test-answer-slot",
+        candidates: [{ token: "test-answer-slot", location: { sheetId: 0, rowIndex: 0, columnIndex: 1 } }],
+      }],
+    }, {
+      questionNumber: "2",
+      prompt: "CPU？／OS？",
+      kind: "group",
+      mappingStatus: "confirmed",
+      blanks: [
+        { label: "（1）", prompt: "CPU？", mappingStatus: "confirmed", selectedToken: "g1", candidates: [{ token: "g1", location: { sheetId: 0, rowIndex: 4, columnIndex: 6 } }] },
+        { label: "（2）", prompt: "OS？", mappingStatus: "confirmed", selectedToken: "g2", candidates: [{ token: "g2", location: { sheetId: 0, rowIndex: 5, columnIndex: 6 } }] },
+      ],
     }],
   }), { EX: 60 });
   await redis.set(`activity:join:${code}`, id, { EX: 60 });
@@ -205,22 +221,99 @@ test("teacher selects a spreadsheet and previews the imported questions", async 
     contentType: "application/json",
     body: JSON.stringify({ accessToken: "picker-access-token" }),
   }));
-  await page.route("**/api/activities/import", (route) => route.fulfill({
-    status: 201,
+  await page.route("**/api/sheets/selected-spreadsheet/tabs", (route) => route.fulfill({
+    status: 200,
     contentType: "application/json",
-    body: JSON.stringify({
-      activityId: "e2e-import-activity",
-      joinCode: "GHJ234",
-      phase: "ready",
-      questions: [{ questionNumber: "1", prompt: "Name the process.", mappingStatus: "confirmed", candidateSlotTokens: [] }],
-    }),
+    body: JSON.stringify({ tabs: [{ sheetId: 1167716485, title: "學習單", index: 0 }] }),
   }));
+  let importedSheetId: number | undefined;
+  await page.route("**/api/activities/import", async (route) => {
+    importedSheetId = (route.request().postDataJSON() as { sheetId: number }).sheetId;
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        activityId: "e2e-import-activity",
+        joinCode: "GHJ234",
+        phase: "ready",
+        layout: "table",
+        questions: [
+          { questionNumber: "1", prompt: "Name the process.", kind: "single", mappingStatus: "confirmed", candidateSlotTokens: [], blanks: [{ label: null, prompt: "Name the process.", mappingStatus: "confirmed" }] },
+          { questionNumber: "2", prompt: "CPU？／OS？", kind: "group", mappingStatus: "confirmed", candidateSlotTokens: [], blanks: [{ label: "（1）", prompt: "CPU？", mappingStatus: "confirmed" }, { label: "（2）", prompt: "OS？", mappingStatus: "confirmed" }] },
+        ],
+      }),
+    });
+  });
 
   await page.goto("/teacher/import");
   await page.getByRole("button", { name: "從 Google 雲端硬碟選取" }).click();
   await expect(page.getByLabel("已選取試算表")).toHaveValue(/Guided Notes/);
+  // A single worksheet tab is selected automatically; no gid has to be typed.
+  await expect(page.getByLabel("工作表分頁")).toHaveValue("1167716485");
   await page.getByRole("button", { name: "匯入並預覽" }).click();
   await expect(page.getByRole("heading", { name: "題目預覽" })).toBeVisible();
-  await expect(page.getByText("1 題 · 已確認")).toBeVisible();
+  await expect(page.getByText("2 題 · 已確認")).toBeVisible();
+  await expect(page.getByText("題組 · 2 小題")).toBeVisible();
+  expect(importedSheetId).toBe(1167716485);
   await expect(page.getByRole("link", { name: "進入教師控制台" })).toHaveAttribute("href", "/teacher/activities/e2e-import-activity");
+});
+
+test("teacher shows per-question import issues", async ({ page }) => {
+  await addTeacherCookie(page);
+  await page.route("https://apis.google.com/js/api.js", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/javascript",
+    body: `window.gapi={load:(_name,options)=>options.callback()};function PickerBuilder(){this.callback=()=>{}}PickerBuilder.prototype.addView=function(){return this};PickerBuilder.prototype.setOAuthToken=function(){return this};PickerBuilder.prototype.setDeveloperKey=function(){return this};PickerBuilder.prototype.setAppId=function(){return this};PickerBuilder.prototype.setCallback=function(callback){this.callback=callback;return this};PickerBuilder.prototype.build=function(){const callback=this.callback;return {setVisible:visible=>visible&&callback({action:"picked",docs:[{id:"selected-spreadsheet",name:"Guided Notes"}]})}};window.google={picker:{PickerBuilder,ViewId:{SPREADSHEETS:"spreadsheets"},Action:{PICKED:"picked"}}};`,
+  }));
+  await page.route("**/api/auth/google/picker-token", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ accessToken: "picker-access-token" }) }));
+  await page.route("**/api/sheets/selected-spreadsheet/tabs", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ tabs: [{ sheetId: 0, title: "封面", index: 0 }, { sheetId: 42, title: "學習單", index: 1 }] }),
+  }));
+  await page.route("**/api/activities/import", (route) => route.fulfill({
+    status: 422,
+    contentType: "application/json",
+    body: JSON.stringify({ error: { code: "INVALID_INPUT", message: "無法匯入學習單，請依下列問題修正後重新匯入。", details: [{ code: "duplicate_question_number", questionNumber: "2", rowNumber: 9, message: "題號 2 重複（第 7 列與第 9 列）。" }] } }),
+  }));
+
+  await page.goto("/teacher/import");
+  await page.getByRole("button", { name: "從 Google 雲端硬碟選取" }).click();
+  await expect(page.getByRole("button", { name: "匯入並預覽" })).toBeDisabled();
+  await page.getByLabel("工作表分頁").selectOption({ label: "學習單" });
+  await page.getByRole("button", { name: "匯入並預覽" }).click();
+  await expect(page.getByText("題號 2 重複（第 7 列與第 9 列）。")).toBeVisible();
+});
+
+test("students must answer every blank of a question group in one submission", async ({ browser }) => {
+  const id = "e2e-group-activity";
+  const code = "GRP234";
+  await clearActivity(id, code);
+  await seedReadyActivity(id, code);
+  const teacherContext = await browser.newContext();
+  const teacherPage = await teacherContext.newPage();
+  let blue: Awaited<ReturnType<typeof joinGroup>> | undefined;
+  try {
+    await addTeacherCookie(teacherPage);
+    await teacherPage.goto(`/teacher/activities/${id}`);
+    await teacherPage.getByLabel("選擇題目").selectOption("2");
+    await teacherPage.getByRole("button", { name: "開啟搶答" }).click();
+    await expect(teacherPage.getByRole("button", { name: "結束本題" })).toBeVisible();
+
+    blue = await joinGroup(browser, code, "Blue");
+    await expect(blue.page.getByLabel("（1） CPU？")).toBeVisible();
+    await blue.page.getByLabel("（1） CPU？").fill("中央處理器");
+    await expect(blue.page.getByRole("button", { name: "送出答案" })).toBeDisabled();
+    await blue.page.getByLabel("（2） OS？").fill("作業系統");
+    await blue.page.getByRole("button", { name: "送出答案" }).click();
+    await expect(blue.page.getByText("答案已送達")).toBeVisible();
+    await expect(teacherPage.getByText("作業系統")).toBeVisible();
+
+    await teacherPage.getByRole("button", { name: "結束本題" }).click();
+    await expect(teacherPage.getByText("搶答成功：Blue")).toBeVisible();
+    await expect(blue.page.getByText("中央處理器")).toBeVisible();
+  } finally {
+    await Promise.all([blue?.context.close(), teacherContext.close()]);
+    await clearActivity(id, code);
+  }
 });

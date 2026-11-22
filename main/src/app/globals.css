@@ -178,6 +178,22 @@ h1 { margin-bottom: 10px; font-size: clamp(30px, 4vw, 42px); line-height: 1.14; 
 .student-waiting p { margin: 4px 0 0; color: var(--ink); font-size: 14px; font-weight: 700; }
 .student-waiting small { color: var(--muted); font-size: 11px; }
 
+/* 002: question groups, import issues, completed rounds */
+.blank-answers { margin: 0; padding: 0; display: grid; gap: 4px; list-style: none; font-size: 12px; overflow-wrap: anywhere; }
+.blank-answers li { display: flex; gap: 6px; line-height: 1.5; }
+.blank-answers li > span { flex: none; color: var(--green); font-weight: 700; }
+.blank-field { display: grid; gap: 6px; }
+.blank-field textarea { min-height: 64px; }
+.import-form select, .open-question-row select { width: 100%; }
+.import-issues { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; line-height: 1.5; }
+.form-error p { margin: 0; }
+.completed-rounds { margin-top: 18px; padding: 22px 24px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); }
+.completed-round-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.completed-round { display: grid; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.completed-round-heading { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.completed-round-heading span { color: var(--muted); font-size: 12px; }
+.completed-round > p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+
 @media (max-width: 700px) {
   .workspace { grid-template-columns: 1fr; padding-bottom: 64px; }
   .rail { position: fixed; z-index: 20; inset: auto 0 0; width: 100%; height: 60px; flex-direction: row; justify-content: center; gap: 18px; padding: 0 16px; border-top: 1px solid rgb(255 255 255 / 12%); }

@@ -31,7 +31,7 @@ describe("security boundaries", () => {
 
     await POST(request, { params: Promise.resolve({ activityId: "activity-1", roundId: "round-1" }) });
 
-    expect(mocks.acceptRoundAnswer).toHaveBeenCalledWith("activity-1", "round-1", "Blue", "safe answer");
+    expect(mocks.acceptRoundAnswer).toHaveBeenCalledWith("activity-1", "round-1", "Blue", ["safe answer"]);
   });
 
   it("never projects another group's live answer to a student", () => {

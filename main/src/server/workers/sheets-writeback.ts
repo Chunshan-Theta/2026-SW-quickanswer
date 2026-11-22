@@ -9,8 +9,8 @@ import { getRedisClient } from "@/server/redis/client";
 import { redisKeys } from "@/server/redis/keyspace";
 import {
   readWritebackJob,
-  saveExpectedPostFingerprint,
   updateWritebackStatus,
+  type WritebackJob,
 } from "@/server/redis/writeback-queue";
 import type { RedisClientType } from "redis";
 
@@ -26,6 +26,15 @@ function errorDetails(error: unknown): { code: string; retryable: boolean } {
     };
   }
   return { code: errorCodes.serviceUnavailable, retryable: true };
+}
+
+/** One answer per blank; jobs queued before question groups only carry the single `answer`. */
+export function jobAnswers(job: Pick<WritebackJob, "answer" | "answers">): string[] {
+  if (job.answers) {
+    const parsed: unknown = JSON.parse(job.answers);
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) return parsed;
+  }
+  return [job.answer];
 }
 
 function wait(milliseconds: number): Promise<void> {
@@ -47,15 +56,9 @@ export async function processWritebackEntry(
     const rawActivity = await redis.get(redisKeys.activity(job.activityId));
     if (!rawActivity) throw new AppError(404, errorCodes.notFound, "找不到課堂活動。");
     const activity = JSON.parse(rawActivity) as ImportedActivity;
-    const prepared = await prepareGuidedNotesWriteback(
-      activity,
-      job.questionNumber,
-      job.answer,
-      job.expectedPostFingerprint,
-    );
+    const prepared = await prepareGuidedNotesWriteback(activity, job.questionNumber, jobAnswers(job));
     if (!prepared.alreadyWritten) {
-      await saveExpectedPostFingerprint(redis, job.jobId, prepared.expectedFingerprint);
-      await applyGuidedNotesWriteback(activity, prepared, job.answer);
+      await applyGuidedNotesWriteback(activity, prepared);
     }
     await updateWritebackStatus(redis, job, "succeeded", attempt);
     return true;

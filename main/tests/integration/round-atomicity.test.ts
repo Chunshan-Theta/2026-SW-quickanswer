@@ -20,6 +20,16 @@ async function seedActivity() {
     questions: [
       { questionId: "question-1", questionNumber, prompt: "Race?", mappingStatus: "confirmed", selectedToken: "slot-1" },
       { questionId: "question-2", questionNumber: "2", prompt: "Next?", mappingStatus: "confirmed", selectedToken: "slot-2" },
+      {
+        questionNumber: "3",
+        prompt: "CPU？／OS？",
+        kind: "group",
+        mappingStatus: "confirmed",
+        blanks: [
+          { label: "（1）", prompt: "CPU？", mappingStatus: "confirmed", candidates: [{ token: "t1", location: { sheetId: 1, rowIndex: 4, columnIndex: 6 } }], selectedToken: "t1" },
+          { label: null, prompt: "OS？", mappingStatus: "confirmed", candidates: [{ token: "t2", location: { sheetId: 1, rowIndex: 5, columnIndex: 6 } }], selectedToken: "t2" },
+        ],
+      },
     ],
     completedQuestionNumbers: [],
   }), { EX: 60 });
@@ -43,7 +53,7 @@ describe("Redis round atomicity", () => {
 
   it("serializes concurrent first submissions and chooses exactly one winner", async () => {
     const round = await openRound(activityId, teacherId, questionNumber);
-    const results = await Promise.all(groups.map((groupId) => submitAnswer(activityId, round.roundId, groupId, `answer from ${groupId}`)));
+    const results = await Promise.all(groups.map((groupId) => submitAnswer(activityId, round.roundId, groupId, [`answer from ${groupId}`])));
     const orders = results.map((result) => result.acceptedOrder);
 
     expect(new Set(orders).size).toBe(groups.length);
@@ -53,12 +63,12 @@ describe("Redis round atomicity", () => {
     expect(await redis.ttl(redisKeys.submissions(round.roundId))).toBeGreaterThan(0);
     expect(await redis.ttl(redisKeys.order(round.roundId))).toBeGreaterThan(0);
     expect(await redis.ttl(redisKeys.winner(round.roundId))).toBeGreaterThan(0);
-    await expect(submitAnswer(activityId, round.roundId, winner!.groupId, "duplicate")).rejects.toMatchObject({ status: 409 });
+    await expect(submitAnswer(activityId, round.roundId, winner!.groupId, ["duplicate"])).rejects.toMatchObject({ status: 409 });
   });
 
   it("linearizes close against concurrent submissions and rejects all later submissions", async () => {
     const round = await openRound(activityId, teacherId, questionNumber);
-    const submissions = groups.slice(0, 20).map((groupId) => submitAnswer(activityId, round.roundId, groupId, `answer ${groupId}`).then(() => true, () => false));
+    const submissions = groups.slice(0, 20).map((groupId) => submitAnswer(activityId, round.roundId, groupId, [`answer ${groupId}`]).then(() => true, () => false));
     const closing = closeRound(activityId, round.roundId, teacherId);
     const [accepted, result] = await Promise.all([Promise.all(submissions), closing]);
     const acceptedCount = accepted.filter(Boolean).length;
@@ -67,7 +77,7 @@ describe("Redis round atomicity", () => {
     expect(result.phase).toBe("closed");
     if (acceptedCount === 0) expect(result.winnerGroupId).toBeNull();
     else expect(result.winnerGroupId).toBeTruthy();
-    await expect(submitAnswer(activityId, round.roundId, groups[21], "too late")).rejects.toMatchObject({ status: 409 });
+    await expect(submitAnswer(activityId, round.roundId, groups[21], ["too late"])).rejects.toMatchObject({ status: 409 });
   });
 
   it("reports no winner when a round closes without submissions", async () => {
@@ -82,5 +92,43 @@ describe("Redis round atomicity", () => {
     await closeRound(activityId, round.roundId, teacherId);
 
     await expect(openRound(activityId, teacherId, questionNumber)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("stores blanks on a group round and records the round per question", async () => {
+    const round = await openRound(activityId, teacherId, "3");
+
+    expect(round).toMatchObject({ kind: "group", blanks: [{ label: "（1）", prompt: "CPU？" }, { label: null, prompt: "OS？" }] });
+    expect(await redis.hGet(redisKeys.round(round.roundId), "blankCount")).toBe("2");
+    const activity = JSON.parse((await redis.get(redisKeys.activity(activityId)))!);
+    expect(activity.roundIdsByQuestion).toEqual({ "3": round.roundId });
+    expect(activity.questions[2].blanks[0].candidates).toHaveLength(1);
+  });
+
+  it("rejects incomplete group answers atomically without consuming an order", async () => {
+    const round = await openRound(activityId, teacherId, "3");
+
+    await expect(submitAnswer(activityId, round.roundId, groups[0], ["CPU"])).rejects.toMatchObject({ status: 422 });
+    await expect(submitAnswer(activityId, round.roundId, groups[0], ["CPU", "   "])).rejects.toMatchObject({ status: 422 });
+    expect(await redis.hGet(redisKeys.round(round.roundId), "nextOrder")).toBe("0");
+
+    const first = await submitAnswer(activityId, round.roundId, groups[1], ["CPU", "作業系統"]);
+    expect(first).toMatchObject({ acceptedOrder: 1, winnerGroupId: groups[1], answers: ["CPU", "作業系統"], answer: "（1）CPU；（2）作業系統" });
+    const second = await submitAnswer(activityId, round.roundId, groups[0], ["GPU", "Linux"]);
+    expect(second.acceptedOrder).toBe(2);
+
+    const result = await closeRound(activityId, round.roundId, teacherId);
+    expect(result.winnerGroupId).toBe(groups[1]);
+    expect(result.submissions.map((submission) => submission.answers)).toEqual([["CPU", "作業系統"], ["GPU", "Linux"]]);
+  });
+
+  it("keeps single questions working with one answer and rejects extra answers", async () => {
+    const round = await openRound(activityId, teacherId, questionNumber);
+
+    await expect(submitAnswer(activityId, round.roundId, groups[0], ["a", "b"])).rejects.toMatchObject({ status: 422 });
+    await expect(submitAnswer(activityId, round.roundId, groups[0], ["photosynthesis"])).resolves.toMatchObject({
+      answer: "photosynthesis",
+      answers: ["photosynthesis"],
+      acceptedOrder: 1,
+    });
   });
 });

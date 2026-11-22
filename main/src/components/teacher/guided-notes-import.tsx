@@ -5,15 +5,32 @@ import Link from "next/link";
 import Script from "next/script";
 import { ArrowRight, Check, LoaderCircle, RotateCw, Upload } from "lucide-react";
 
+type ImportBlank = { label: string | null; prompt: string; mappingStatus: "confirmed" | "ambiguous" | "missing" };
 type ImportQuestion = {
   questionNumber: string;
   prompt: string;
+  kind?: "single" | "group";
   mappingStatus: "confirmed" | "ambiguous" | "missing";
   candidateSlotTokens: string[];
+  blanks?: ImportBlank[];
 };
 
 type ImportResult = { activityId: string; joinCode: string; phase: "ready" | "mapping_review"; questions: ImportQuestion[] };
-type ApiError = { error?: { message?: string } };
+type ImportIssue = { code: string; message: string; questionNumber?: string; rowNumber?: number };
+type ApiError = { error?: { message?: string; details?: unknown } };
+type SheetTab = { sheetId: number; title: string; index: number };
+
+class ImportError extends Error {
+  constructor(message: string, public readonly issues: ImportIssue[]) {
+    super(message);
+  }
+}
+
+function issuesFrom(details: unknown): ImportIssue[] {
+  return Array.isArray(details)
+    ? details.filter((item): item is ImportIssue => typeof item === "object" && item !== null && typeof (item as ImportIssue).message === "string")
+    : [];
+}
 type PickerResponse = { action: string; docs?: Array<{ id?: string; name?: string }> };
 
 interface PickerBuilder {
@@ -46,7 +63,9 @@ function spreadsheetIdFromInput(value: string): string {
 export function TeacherGuidedNotesImport() {
   const [spreadsheet, setSpreadsheet] = useState("");
   const [spreadsheetName, setSpreadsheetName] = useState("");
-  const [sheetId, setSheetId] = useState("0");
+  const [tabs, setTabs] = useState<SheetTab[]>([]);
+  const [sheetId, setSheetId] = useState("");
+  const [issues, setIssues] = useState<ImportIssue[]>([]);
   const [groups, setGroups] = useState("A, B");
   const [result, setResult] = useState<ImportResult | null>(null);
   const [selections, setSelections] = useState<Record<string, string>>({});
@@ -58,8 +77,25 @@ export function TeacherGuidedNotesImport() {
   const pickerAppId = process.env.NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT_NUMBER ?? "";
   const pickerConfigured = Boolean(pickerApiKey && pickerAppId);
 
+  async function loadTabs(spreadsheetId: string) {
+    setTabs([]);
+    setSheetId("");
+    const response = await fetch(`/api/sheets/${encodeURIComponent(spreadsheetId)}/tabs`);
+    const body = await response.json() as { tabs?: SheetTab[] } & ApiError;
+    if (!response.ok || !body.tabs) throw new Error(body.error?.message ?? "無法讀取工作表分頁。");
+    if (body.tabs.length === 0) throw new Error("這份試算表沒有可用的工作表分頁。");
+    setTabs(body.tabs);
+    if (body.tabs.length === 1) {
+      setSheetId(String(body.tabs[0].sheetId));
+      setNotice(`已選取試算表與分頁「${body.tabs[0].title}」，可以匯入。`);
+    } else {
+      setNotice(`這份試算表有 ${body.tabs.length} 個分頁，請選擇要匯入的分頁。`);
+    }
+  }
+
   async function selectSpreadsheet() {
     setError("");
+    setIssues([]);
     setNotice("");
     setBusy(true);
     try {
@@ -90,7 +126,10 @@ export function TeacherGuidedNotesImport() {
           setSpreadsheetName(file.name ?? "");
           setResult(null);
           setSelections({});
-          setNotice("已選取試算表，請確認工作表 gid 後匯入。");
+          setBusy(true);
+          loadTabs(file.id)
+            .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "無法讀取工作表分頁。"))
+            .finally(() => setBusy(false));
         })
         .build()
         .setVisible(true);
@@ -107,8 +146,13 @@ export function TeacherGuidedNotesImport() {
       setError("請先使用 Google Picker 選取試算表。");
       return;
     }
+    if (!sheetId) {
+      setError("請選擇要匯入的工作表分頁。");
+      return;
+    }
     setBusy(true);
     setError("");
+    setIssues([]);
     setNotice("");
     setResult(null);
     setSelections({});
@@ -123,11 +167,12 @@ export function TeacherGuidedNotesImport() {
         }),
       });
       const body = await response.json() as ImportResult & ApiError;
-      if (!response.ok) throw new Error(body.error?.message ?? "無法匯入工作表。");
+      if (!response.ok) throw new ImportError(body.error?.message ?? "無法匯入工作表。", issuesFrom(body.error?.details));
       setResult(body);
       setNotice(body.phase === "ready" ? "題目已完成辨識，可以進行下一步。" : "有答案空格需要確認，確認完成前無法開始活動。");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "連線失敗，請稍後重試。");
+      setIssues(caught instanceof ImportError ? caught.issues : []);
     } finally {
       setBusy(false);
     }
@@ -185,22 +230,34 @@ export function TeacherGuidedNotesImport() {
         {!pickerConfigured && <p className="field-hint">尚未設定 Google Picker API 金鑰與 Cloud 專案編號，請聯絡管理員。</p>}
         <div className="import-form-row">
           <div>
-            <label className="field-label" htmlFor="sheet-id">工作表 gid</label>
-            <input id="sheet-id" inputMode="numeric" pattern="[0-9]+" required value={sheetId} onChange={(event) => setSheetId(event.target.value)} />
+            <label className="field-label" htmlFor="sheet-tab">工作表分頁</label>
+            <select id="sheet-tab" disabled={busy || tabs.length === 0} required value={sheetId} onChange={(event) => setSheetId(event.target.value)}>
+              <option value="">{tabs.length === 0 ? "請先選取試算表" : "選擇分頁"}</option>
+              {tabs.map((tab) => <option key={tab.sheetId} value={String(tab.sheetId)}>{tab.title}</option>)}
+            </select>
           </div>
           <div>
             <label className="field-label" htmlFor="groups">組別名稱</label>
             <input id="groups" required value={groups} onChange={(event) => setGroups(event.target.value)} />
           </div>
         </div>
-        <p className="field-hint">組別以逗號分隔。系統會依題號掃描題目與答案空格，不使用固定儲存格位置。</p>
-        <button className="primary-action" disabled={busy || !spreadsheet} type="submit">
+        <p className="field-hint">組別以逗號分隔。系統依標題列（題號／題目／作答）與題號辨識題目與作答格，支援題組，不使用固定儲存格位置。</p>
+        <button className="primary-action" disabled={busy || !spreadsheet || !sheetId} type="submit">
           {busy ? <LoaderCircle className="spin" size={17} /> : <Upload size={16} />}
           {busy ? "正在讀取" : "匯入並預覽"}
         </button>
       </form>
 
-      {error && <p className="form-message form-error" role="alert">{error}</p>}
+      {error && (
+        <div className="form-message form-error" role="alert">
+          <p>{error}</p>
+          {issues.length > 0 && (
+            <ul className="import-issues">
+              {issues.map((issue, index) => <li key={`${issue.code}-${index}`}>{issue.message}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
       {notice && <p className="form-message form-notice" role="status">{notice}</p>}
 
       {result && (
@@ -214,7 +271,16 @@ export function TeacherGuidedNotesImport() {
               <li className="preview-row" key={`${result.activityId}-${question.questionNumber}`}>
                 <span className="preview-number">{question.questionNumber.padStart(2, "0")}</span>
                 <div className="preview-prompt">
-                  <strong>{question.prompt}</strong>
+                  {question.kind === "group" && question.blanks ? (
+                    <>
+                      <strong>題組 · {question.blanks.length} 小題</strong>
+                      <ul className="blank-answers">
+                        {question.blanks.map((blank, index) => <li key={index}><span>{blank.label ?? `（${index + 1}）`}</span>{blank.prompt || "（未提供子題敘述）"}</li>)}
+                      </ul>
+                    </>
+                  ) : (
+                    <strong>{question.prompt || "（未提供題目敘述）"}</strong>
+                  )}
                   {question.mappingStatus === "ambiguous" ? (
                     <label className="field-label mapping-field">
                       選擇題號 {question.questionNumber} 的答案空格

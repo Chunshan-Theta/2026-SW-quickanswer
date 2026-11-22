@@ -57,6 +57,24 @@ describe("round controls and submission routes", () => {
     mocks.submitAnswer.mockResolvedValue({ groupId: "Blue", acceptedOrder: 1 });
     const response = await submit(request({ answer: "A", requestId: "123e4567-e89b-42d3-a456-426614174000", groupId: "Red" }), roundParams);
     expect(response.status).toBe(201);
-    expect(mocks.submitAnswer).toHaveBeenCalledWith("activity-1", "round-1", "Blue", "A");
+    // The legacy single `answer` is normalised to a one-element `answers` array.
+    expect(mocks.submitAnswer).toHaveBeenCalledWith("activity-1", "round-1", "Blue", ["A"]);
+  });
+
+  it("submits every blank of a question group in one request", async () => {
+    mocks.getRequestSession.mockReturnValue(student);
+    mocks.submitAnswer.mockResolvedValue({ groupId: "Blue", acceptedOrder: 1, answers: ["CPU", "OS"] });
+    const response = await submit(request({ answers: [" CPU ", "OS"], requestId: "123e4567-e89b-42d3-a456-426614174000" }), roundParams);
+    expect(response.status).toBe(201);
+    expect(mocks.submitAnswer).toHaveBeenCalledWith("activity-1", "round-1", "Blue", ["CPU", "OS"]);
+  });
+
+  it("rejects an empty sub-answer before it reaches the round store", async () => {
+    mocks.getRequestSession.mockReturnValue(student);
+    for (const body of [{ answers: ["CPU", "  "] }, { answers: [] }, { answer: "" }]) {
+      const response = await submit(request({ ...body, requestId: "123e4567-e89b-42d3-a456-426614174000" }), roundParams);
+      expect(response.status).toBe(422);
+    }
+    expect(mocks.submitAnswer).not.toHaveBeenCalled();
   });
 });

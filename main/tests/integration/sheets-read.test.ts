@@ -27,7 +27,7 @@ vi.mock("googleapis", () => ({
   },
 }));
 
-import { readWorksheet, writeWorksheetAnswers } from "@/features/sheets/google-sheets.adapter";
+import { listSheetTabs, readWorksheet, writeWorksheetAnswers } from "@/features/sheets/google-sheets.adapter";
 
 function worksheetResponse() {
   return {
@@ -103,5 +103,73 @@ describe("Google Sheets adapter", () => {
         data: [{ range: "'Teacher''s Notes'!AA6", values: [["=1+1"]] }],
       },
     });
+  });
+
+  it("maps merged ranges, defaulting indexes the API omits when they are zero", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "client");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "secret");
+    vi.stubEnv("GOOGLE_REDIRECT_URI", "http://localhost/callback");
+    mocks.getGoogleTokens.mockResolvedValue({ access_token: "token" });
+    mocks.getSheet.mockResolvedValue({
+      data: {
+        sheets: [{
+          // sheetId 0 is omitted by the API, exactly like startRowIndex 0 below.
+          properties: { title: "學習單" },
+          data: [{ rowData: [{ values: [{ formattedValue: "題號" }] }] }],
+          merges: [
+            { endRowIndex: 2, startColumnIndex: 1, endColumnIndex: 8 },
+            { startRowIndex: 4, endRowIndex: 6, startColumnIndex: 1, endColumnIndex: 2 },
+          ],
+        }],
+      },
+    });
+
+    const grid = await readWorksheet("teacher-1", "spreadsheet-1", 0);
+
+    expect(grid.merges).toEqual([
+      { startRow: 0, endRow: 2, startColumn: 1, endColumn: 8 },
+      { startRow: 4, endRow: 6, startColumn: 1, endColumn: 2 },
+    ]);
+  });
+
+  it("explains a missing worksheet tab", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "client");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "secret");
+    vi.stubEnv("GOOGLE_REDIRECT_URI", "http://localhost/callback");
+    mocks.getGoogleTokens.mockResolvedValue({ access_token: "token" });
+    mocks.getSheet.mockResolvedValue(worksheetResponse());
+
+    await expect(readWorksheet("teacher-1", "spreadsheet-1", 0)).rejects.toMatchObject({ status: 404, message: expect.stringContaining("分頁") });
+  });
+
+  it("lists worksheet tabs by index using a properties-only request", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "client");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "secret");
+    vi.stubEnv("GOOGLE_REDIRECT_URI", "http://localhost/callback");
+    mocks.getGoogleTokens.mockResolvedValue({ access_token: "token" });
+    mocks.getSheet.mockResolvedValue({ data: { sheets: [
+      { properties: { sheetId: 1167716485, title: "學習單", index: 1 } },
+      { properties: { title: "封面" } },
+    ] } });
+
+    const tabs = await listSheetTabs("teacher-1", "spreadsheet-1");
+
+    expect(mocks.getSheet).toHaveBeenCalledWith({ spreadsheetId: "spreadsheet-1", fields: "sheets.properties(sheetId,title,index)" });
+    expect(tabs).toEqual([
+      { sheetId: 0, title: "封面", index: 0 },
+      { sheetId: 1167716485, title: "學習單", index: 1 },
+    ]);
+  });
+
+  it("maps a missing spreadsheet and revoked access when listing tabs", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "client");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "secret");
+    vi.stubEnv("GOOGLE_REDIRECT_URI", "http://localhost/callback");
+    mocks.getGoogleTokens.mockResolvedValue({ access_token: "token" });
+    mocks.getSheet.mockRejectedValueOnce(Object.assign(new Error("not found"), { code: 404 }));
+    mocks.getSheet.mockRejectedValueOnce(Object.assign(new Error("forbidden"), { code: 403 }));
+
+    await expect(listSheetTabs("teacher-1", "missing")).rejects.toMatchObject({ status: 404 });
+    await expect(listSheetTabs("teacher-1", "revoked")).rejects.toMatchObject({ status: 403 });
   });
 });

@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   getRedisClient: vi.fn(),
   readWritebackJob: vi.fn(),
   updateWritebackStatus: vi.fn(),
-  saveExpectedPostFingerprint: vi.fn(),
   prepareGuidedNotesWriteback: vi.fn(),
   applyGuidedNotesWriteback: vi.fn(),
 }));
@@ -15,14 +14,13 @@ vi.mock("@/server/redis/client", () => ({ getRedisClient: mocks.getRedisClient }
 vi.mock("@/server/redis/writeback-queue", () => ({
   readWritebackJob: mocks.readWritebackJob,
   updateWritebackStatus: mocks.updateWritebackStatus,
-  saveExpectedPostFingerprint: mocks.saveExpectedPostFingerprint,
 }));
 vi.mock("@/features/sheets/application/writeback-guided-notes", () => ({
   prepareGuidedNotesWriteback: mocks.prepareGuidedNotesWriteback,
   applyGuidedNotesWriteback: mocks.applyGuidedNotesWriteback,
 }));
 
-import { processWritebackEntry, runSheetsWritebackWorker } from "@/server/workers/sheets-writeback";
+import { jobAnswers, processWritebackEntry, runSheetsWritebackWorker } from "@/server/workers/sheets-writeback";
 
 const job = {
   jobId: "activity-1:round-1",
@@ -68,11 +66,28 @@ describe("writeback worker recovery", () => {
 
   it("marks a write successful without repeating an already verified Sheet update", async () => {
     mocks.readWritebackJob.mockResolvedValue(job);
-    mocks.prepareGuidedNotesWriteback.mockResolvedValue({ alreadyWritten: true, expectedFingerprint: "post-write-hash" });
+    mocks.prepareGuidedNotesWriteback.mockResolvedValue({ alreadyWritten: true, targets: [] });
 
     await expect(processWritebackEntry(redis, job.jobId)).resolves.toBe(true);
     expect(mocks.applyGuidedNotesWriteback).not.toHaveBeenCalled();
     expect(mocks.updateWritebackStatus).toHaveBeenLastCalledWith(redis, job, "succeeded", 1);
+  });
+
+  it("passes every blank's answer from the job and applies the prepared targets", async () => {
+    const groupJob = { ...job, answer: "（1）CPU；（2）OS", answers: JSON.stringify(["CPU", "OS"]) };
+    const prepared = { alreadyWritten: false, sheetTitle: "學習單", targets: [] };
+    mocks.readWritebackJob.mockResolvedValue(groupJob);
+    mocks.prepareGuidedNotesWriteback.mockResolvedValue(prepared);
+
+    await expect(processWritebackEntry(redis, job.jobId)).resolves.toBe(true);
+    expect(mocks.prepareGuidedNotesWriteback).toHaveBeenCalledWith({}, "1", ["CPU", "OS"]);
+    expect(mocks.applyGuidedNotesWriteback).toHaveBeenCalledWith({}, prepared);
+    expect(mocks.updateWritebackStatus).toHaveBeenLastCalledWith(redis, groupJob, "succeeded", 1);
+  });
+
+  it("falls back to the single answer for jobs queued before question groups", () => {
+    expect(jobAnswers({ answer: "=1+1" })).toEqual(["=1+1"]);
+    expect(jobAnswers({ answer: "x", answers: JSON.stringify(["a", "b"]) })).toEqual(["a", "b"]);
   });
 
   it("stops retrying after the configured attempt limit", async () => {

@@ -33,7 +33,7 @@ export default async function TeacherImportPage() {
               <h1>匯入課堂題目</h1>
               <p className="subheading">從 Google Sheets 載入題目，確認答案空格後準備活動。</p>
             </div>
-            <span className="date-stamp">單題簡答 · 依題號動態配對</span>
+            <span className="date-stamp">單題與題組 · 依標題列動態辨識</span>
           </div>
           {isTeacher ? (
             <TeacherGuidedNotesImport />
