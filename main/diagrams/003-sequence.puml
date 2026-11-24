@@ -1,0 +1,60 @@
+@startuml
+title Sequence Diagram - 003 Two Groups and the Teacher in One Browser
+
+actor "Tab A" as TabA
+actor "Tab B" as TabB
+actor "Teacher tab" as TeacherTab
+participant "Cookie jar\n(shared by all tabs)" as Jar
+participant "Join Route" as JoinAPI
+participant "Student Activity Page" as Page
+participant "Submission / Events Routes" as API
+participant "Session Module" as Session
+participant "Round Store (Lua)" as Redis
+
+== Join (each tab gets its own seat) ==
+TabA -> JoinAPI : POST /api/activities/{id}/join (teamA)
+JoinAPI -> Session : createSeatId() → seatA\npruneSeatCookies(request)
+JoinAPI --> TabA : 200 { groupId: teamA, seatId: seatA }\nSet-Cookie qa_seat_seatA (HttpOnly)
+TabA -> Jar : store qa_seat_seatA
+TabA -> Page : GET /student/activity?seat=seatA
+Page -> Session : getStudentServerSession(seatA)
+Session --> Page : teamA claims
+TabB -> JoinAPI : POST join (teamB)
+JoinAPI --> TabB : 200 { seatId: seatB }\nSet-Cookie qa_seat_seatB
+TabB -> Jar : store qa_seat_seatB (qa_seat_seatA untouched)
+
+== Live updates ==
+TabA -> API : EventSource /events?seat=seatA\n(Cookie: qa_teacher, qa_seat_seatA, qa_seat_seatB)
+API -> Session : getRequestSession(request)
+Session -> Session : seat = seatA → verify qa_seat_seatA\n(role student, claims.seatId == seatA)
+Session --> API : teamA
+API --> TabA : snapshot / events projected for teamA only
+
+== Submit (the reported bug scenario) ==
+TabA -> API : POST submissions\nx-quickanswer-seat: seatA
+API -> Session : getRequestSession → teamA
+API -> Redis : submit(teamA, answers)
+Redis --> API : acceptedOrder 1
+API --> TabA : 201 teamA
+TabB -> API : POST submissions\nx-quickanswer-seat: seatB
+API -> Session : getRequestSession → teamB
+API -> Redis : submit(teamB, answers)
+Redis --> API : acceptedOrder 2
+API --> TabB : 201 teamB
+
+== Teacher in the same browser ==
+TeacherTab -> API : POST rounds/{roundId}/close (no seat)
+API -> Session : getRequestSession → qa_teacher only
+Session --> API : teacher claims
+API --> TeacherTab : 200 closed, winner teamA
+
+== Rejected ==
+TabA -> API : POST rounds/open with seat header
+API -> Session : getRequestSession → student claims
+API --> TabA : 403 (teacher only)
+note over API
+	Copied URL in another browser (no cookie) → 401
+	Malformed or unknown seat → 401, never the teacher cookie
+	Seat of activity X used on activity Y → 403
+end note
+@enduml
