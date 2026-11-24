@@ -33,24 +33,24 @@ end
 alt Question count or mapping invalid
   TeacherUI --> Teacher : Show error and block start
 else Questions valid
-  Teacher -> TeacherUI : Open current question
-  TeacherUI -> API : POST open
+  Teacher -> TeacherUI : Tick one or more questions and open them
+  TeacherUI -> API : POST open (questionNumbers[])
   API -> QuizFlow : Validate teacher and transition
-  QuizFlow -> Redis : Lua: set open + XADD phase event
+  QuizFlow -> Redis : Lua: open all selected or none + XADD phase event per round
   ActivitySync -> Redis : Per-instance XREAD event Stream
   ActivitySync -> TeacherUI : Authorized phase.changed SSE
   ActivitySync -> StudentA : Phase-only SSE
   ActivitySync -> StudentB : Phase-only SSE
 
   par Group A submits
-    StudentA -> API : POST answers[] (group from session)
+    StudentA -> API : POST answers[] for one open round (group from the tab's seat session)
     API -> QuizFlow : Validate phase and group
     QuizFlow -> Redis : Lua: accept once, sequence, winner, XADD
     Redis --> QuizFlow : Accepted order
     QuizFlow --> API : Submission receipt
     API --> StudentA : Own receipt only
   else Group B submits
-    StudentB -> API : POST answers[] (group from session)
+    StudentB -> API : POST answers[] for one open round (group from the tab's seat session)
     API -> QuizFlow : Validate phase and group
     QuizFlow -> Redis : Lua: accept once, sequence, winner, XADD
     Redis --> QuizFlow : Accepted order
@@ -61,14 +61,15 @@ else Questions valid
   ActivitySync -> Redis : Read appended events
   ActivitySync --> TeacherUI : Live statuses and order
   note over StudentA, StudentB
-    While the round is open, students only see
-    their own status, never other groups' answers or ranks.
+    While a round is open, students only see their own status
+    for that round, never other groups' answers or ranks.
+    Every open question is listed and answered separately.
   end note
 
-  Teacher -> TeacherUI : Close current question
-  TeacherUI -> API : POST close
+  Teacher -> TeacherUI : Close one question or every open question
+  TeacherUI -> API : POST close (one round) / close-all
   API -> QuizFlow : Validate teacher and transition
-  QuizFlow -> Redis : Lua: close + finalize + XADD results
+  QuizFlow -> Redis : Lua: close each target + finalize + XADD results per round
   Redis --> QuizFlow : Immutable winner and result version
   QuizFlow --> API : Final result
   ActivitySync -> Redis : Read results.finalized event
@@ -80,7 +81,7 @@ else Questions valid
     Teacher -> TeacherUI : Request writeback after close
     TeacherUI -> API : POST writeback
     API -> Redis : XADD idempotent writeback job
-    Redis --> API : Job queued
+    Redis --> API : Job queued (a failed job may be re-queued)
     API --> TeacherUI : 202 queued
     Worker -> Redis : XREADGROUP pending jobs
     Worker -> SheetsAccess : Rescan, verify structure snapshot, write RAW values

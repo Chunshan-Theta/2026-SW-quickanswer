@@ -7,7 +7,7 @@ import { POST as close } from "@/app/api/activities/[activityId]/rounds/[roundId
 import { GET as events } from "@/app/api/activities/[activityId]/events/route";
 import { SEAT_HEADER, withSeat } from "@/lib/session/seat";
 import { signSession } from "@/server/auth/session";
-import { openRound } from "@/server/redis/round-store";
+import { openRounds } from "@/server/redis/round-store";
 import { redisKeys } from "@/server/redis/keyspace";
 import { CookieJar } from "../fixtures/cookie-jar";
 
@@ -74,12 +74,11 @@ describe("tab-scoped sessions: one browser, several groups", () => {
       joinCode,
       phase: "ready",
       stateVersion: 0,
-      currentRoundId: null,
       groupNames: ["teamA", "teamB"],
       questions: [{ questionNumber: "1", prompt: "Name the process.", kind: "single", mappingStatus: "confirmed" }],
     }), { EX: 60 });
     await redis.set(redisKeys.joinCode(joinCode), activityId, { EX: 60 });
-    roundId = (await openRound(activityId, teacherId, "1")).roundId;
+    roundId = (await openRounds(activityId, teacherId, ["1"])).rounds[0].roundId;
   });
 
   afterEach(async () => {

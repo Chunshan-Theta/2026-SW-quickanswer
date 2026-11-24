@@ -16,6 +16,8 @@ export async function POST(request: Request, context: { params: Promise<{ activi
     const parsed = roundSubmissionSchema.safeParse(body);
     if (!parsed.success) throw new AppError(422, errorCodes.invalidInput, "請填寫所有子題的答案。", parsed.error.flatten());
     const result = await acceptRoundAnswer(activityId, roundId, student.groupId!, parsed.data.answers);
-    return jsonResponse({ accepted: true, ...result }, id, 201);
+    // Only the group's own receipt: the winner stays hidden until the question closes (FR-009).
+    const { groupId, answer, answers, acceptedOrder, acceptedAt, stateVersion } = result;
+    return jsonResponse({ accepted: true, groupId, answer, answers, acceptedOrder, acceptedAt, stateVersion }, id, 201);
   });
 }

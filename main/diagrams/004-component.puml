@@ -1,0 +1,56 @@
+@startuml
+!pragma layout smetana
+title Component Diagram - 004 Multi-Question Rounds & Teacher Question Board
+left to right direction
+
+actor Teacher
+actor Student
+
+package "Next.js App (Node.js runtime)" {
+	component "Teacher Question Board\n(card list + sticky toolbar)" as BoardUI
+	component "Student Open Questions\n(one card per open round)" as StudentUI
+	component "Round State Reducer\n(pure, shared by both UIs)" as Reducer
+	component "Student API Client\n(events URL + submit)" as StudentApi
+	component "Open Route\nPOST rounds/open\n{questionNumbers[]} | {questionNumber}" as OpenAPI
+	component "Close Route\nPOST rounds/{roundId}/close" as CloseAPI
+	component "Close-All Route\nPOST rounds/close-all" as CloseAllAPI
+	component "Submissions Route\nPOST rounds/{roundId}/submissions" as SubmitAPI
+	component "Writeback Route\n(failed job can be re-queued)" as WritebackAPI
+	component "Round Service" as RoundService
+	component "Round Store (Lua)\nopen-rounds / submit-answer / close-rounds" as RoundStore
+	component "Activity Snapshot\nrounds[] (open + closed)" as Snapshot
+	component "Activity SSE + Projection\n(per-round privacy)" as Sync
+}
+
+database "Private Redis\nactivity.openRoundIdsByQuestion\nround:{id}:* per question" as Redis
+
+Teacher --> BoardUI : select questions, open, close one / all, write back
+Student --> StudentUI : answer every open question separately
+BoardUI --> Reducer : apply SSE events / API results
+StudentUI --> Reducer : apply SSE events
+StudentUI --> StudentApi : submit answers[] per round
+BoardUI --> OpenAPI : open selected (atomic)
+BoardUI --> CloseAPI : close one round
+BoardUI --> CloseAllAPI : close every open round
+BoardUI --> WritebackAPI : write back / retry failed
+StudentApi --> SubmitAPI : POST answers[]
+StudentApi --> Sync : EventSource
+OpenAPI --> RoundService
+CloseAPI --> RoundService
+CloseAllAPI --> RoundService
+SubmitAPI --> RoundService
+RoundService --> RoundStore
+RoundStore --> Redis : all-or-nothing state change + one event per round
+Snapshot --> Redis : load every round of the activity
+Sync --> Snapshot : reconnect snapshot
+Sync --> Redis : read event Stream
+Sync --> BoardUI : phase.changed / submission.accepted / results.finalized / writeback.status
+Sync --> StudentUI : phase.changed / own receipt / results.finalized
+
+note bottom of Redis
+	openRoundIdsByQuestion maps question number -> open round id.
+	It is a JSON object (never an empty array) and is removed
+	when no round is open. Each question has at most one round;
+	order, winner and submissions stay per round.
+end note
+@enduml

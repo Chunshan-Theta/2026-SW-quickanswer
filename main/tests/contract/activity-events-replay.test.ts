@@ -53,7 +53,7 @@ describe("activity SSE replay", () => {
     mocks.getRequestSession.mockReturnValue(teacher);
     mocks.subscribeToActivityEvents.mockResolvedValue(vi.fn());
     mocks.replayActivityEvents.mockResolvedValue({ available: false });
-    mocks.getActivitySnapshot.mockResolvedValue({ activityId: "activity-1", stateVersion: 8, currentRound: null });
+    mocks.getActivitySnapshot.mockResolvedValue({ activityId: "activity-1", stateVersion: 8, rounds: [] });
 
     const response = await GET(
       new Request("http://localhost/api/activities/activity-1/events", { headers: { "last-event-id": "2" } }),
@@ -76,8 +76,8 @@ describe("activity SSE replay", () => {
       return vi.fn();
     });
     mocks.getActivitySnapshot
-      .mockResolvedValueOnce({ activityId: "activity-1", stateVersion: 4, currentRound: null })
-      .mockResolvedValueOnce({ activityId: "activity-1", stateVersion: 6, currentRound: null });
+      .mockResolvedValueOnce({ activityId: "activity-1", stateVersion: 4, rounds: [] })
+      .mockResolvedValueOnce({ activityId: "activity-1", stateVersion: 6, rounds: [] });
 
     const response = await GET(
       new Request("http://localhost/api/activities/activity-1/events"),

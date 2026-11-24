@@ -27,7 +27,8 @@ export interface ActivitySummary {
   phase: ActivityPhase;
   stateVersion: number;
   questionIds: string[];
-  currentRoundId: string | null;
+  /** Question number -> open round id; absent while no question is open (004). */
+  openRoundIdsByQuestion?: Record<string, string>;
   createdAt: number;
   expiresAt: number;
 }

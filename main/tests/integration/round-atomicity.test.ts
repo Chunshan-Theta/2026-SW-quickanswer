@@ -1,13 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createClient, type RedisClientType } from "redis";
-import { closeRound, openRound, submitAnswer } from "@/server/redis/round-store";
+import { closeRound, openRounds, submitAnswer } from "@/server/redis/round-store";
 import { redisKeys } from "@/server/redis/keyspace";
 
-const activityId = "round-race-test";
+// Unique per run so parallel test runs sharing one Redis never collide.
+const activityId = `round-race-test-${randomUUID()}`;
 const teacherId = "teacher-race-test";
 const questionNumber = "1";
 const groups = Array.from({ length: 40 }, (_, index) => `Group-${index + 1}`);
 let redis: RedisClientType;
+
+const openRound = async (id: string, teacher: string, number: string) => (await openRounds(id, teacher, [number])).rounds[0];
 
 async function seedActivity() {
   await redis.set(redisKeys.activity(activityId), JSON.stringify({
@@ -15,7 +19,6 @@ async function seedActivity() {
     teacherId,
     phase: "ready",
     stateVersion: 0,
-    currentRoundId: null,
     groupNames: groups,
     questions: [
       { questionId: "question-1", questionNumber, prompt: "Race?", mappingStatus: "confirmed", selectedToken: "slot-1" },

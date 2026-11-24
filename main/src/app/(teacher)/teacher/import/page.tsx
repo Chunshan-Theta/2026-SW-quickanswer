@@ -44,7 +44,8 @@ export default async function TeacherImportPage() {
                 <h2 id="auth-title">連結教師帳戶</h2>
                 <p>登入後選取可編輯的 Guided Notes 工作表，授權僅由伺服器保存。</p>
               </div>
-              <Link className="primary-action" href="/api/auth/google/start">使用 Google 登入 <ArrowUpRight size={16} /></Link>
+              {/* Plain <a>: next/link would request the OAuth start route twice and mismatch the state cookie. */}
+              <a className="primary-action" href="/api/auth/google/start">使用 Google 登入 <ArrowUpRight size={16} /></a>
             </section>
           )}
           <footer className="page-footer">

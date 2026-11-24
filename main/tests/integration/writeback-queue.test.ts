@@ -55,6 +55,23 @@ describe("writeback queue", () => {
     expect(await redis.hGet(redisKeys.writebackJob(first.jobId), "answer")).toBe("winner");
   });
 
+  it("re-queues a failed job so the teacher can retry, while other statuses stay idempotent", async () => {
+    const first = await enqueueWriteback(activityId, roundId, teacherId);
+    const jobKey = redisKeys.writebackJob(first.jobId);
+    await redis.hSet(jobKey, { status: "succeeded", attempt: "1" });
+    await expect(enqueueWriteback(activityId, roundId, teacherId)).resolves.toMatchObject({ status: "succeeded", existing: true });
+
+    await redis.hSet(jobKey, { status: "failed", attempt: "3", errorCode: "STRUCTURE_CHANGED" });
+    const retried = await enqueueWriteback(activityId, roundId, teacherId);
+
+    expect(retried).toMatchObject({ jobId: first.jobId, status: "queued", existing: false });
+    expect(await redis.hGetAll(jobKey)).toMatchObject({ status: "queued", attempt: "0", errorCode: "", answer: "winner" });
+    const queuedEntries = ((await redis.xRange(redisKeys.writebackJobs, "-", "+")) ?? []).filter((entry) => entry.message.jobId === first.jobId);
+    expect(queuedEntries).toHaveLength(2);
+    const events = ((await redis.xRange(redisKeys.activityEvents(activityId), "-", "+")) ?? []).map((entry) => JSON.parse(entry.message.payload) as { type: string; data: { status: string } });
+    expect(events.filter((event) => event.type === "writeback.status" && event.data.status === "queued")).toHaveLength(2);
+  });
+
   it("rejects a closed round without a winner", async () => {
     await redis.hSet(redisKeys.round(roundId), "winnerGroupId", "");
 

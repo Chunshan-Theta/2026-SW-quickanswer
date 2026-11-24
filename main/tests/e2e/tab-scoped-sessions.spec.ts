@@ -56,7 +56,6 @@ test("two groups and the teacher share one browser without overwriting each othe
     joinCode,
     phase: "ready",
     stateVersion: 0,
-    currentRoundId: null,
     groupNames: ["Blue", "Red"],
     questions: [{ questionNumber: "1", prompt: "Name the process.", kind: "single", mappingStatus: "confirmed" }],
   }), { EX: 120 });

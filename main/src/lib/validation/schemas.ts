@@ -34,9 +34,23 @@ export const roundSubmissionSchema = z
   ])
   .transform((value) => ({ answers: "answers" in value ? value.answers : [value.answer], requestId: value.requestId }));
 
-export const roundOpenSchema = z.object({
-  questionNumber: z.string().trim().regex(/^\d+$/).max(32),
-});
+const questionNumber = z.string().trim().regex(/^\d+$/).max(32);
+
+/**
+ * Accepts several `questionNumbers` (opened together, all or nothing) or the legacy single
+ * `questionNumber`; `legacy` tells the route to answer with the legacy single-round response.
+ */
+export const roundOpenSchema = z
+  .union([
+    z.object({
+      questionNumbers: z.array(questionNumber).min(1).max(1000)
+        .refine((numbers) => new Set(numbers).size === numbers.length, { message: "題號不可重複。" }),
+    }),
+    z.object({ questionNumber }),
+  ])
+  .transform((value) => "questionNumbers" in value
+    ? { questionNumbers: value.questionNumbers, legacy: false }
+    : { questionNumbers: [value.questionNumber], legacy: true });
 
 export const writebackRequestSchema = z.object({
   requestId: z.string().uuid(),

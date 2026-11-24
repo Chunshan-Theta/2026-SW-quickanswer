@@ -35,7 +35,7 @@ export default async function TeacherActivityPage({ params }: { params: Promise<
             <div>
               <p className="eyebrow">LIVE CLASSROOM / TEACHER</p>
               <h1>課堂搶答控制</h1>
-              <p className="subheading">依序開啟題目、檢視各組狀態，並在適當時機結束搶答。</p>
+              <p className="subheading">勾選題目即可同時開放搶答；各題即時排名，可逐題或一次結束。</p>
             </div>
             <span className="date-stamp">{activity.questions.length} 題 · {activity.groupNames.length} 組</span>
           </div>

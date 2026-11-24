@@ -1,7 +1,11 @@
 local existingJobId = redis.call("GET", KEYS[4])
 if existingJobId then
   local status = redis.call("HGET", KEYS[5], "status") or "queued"
-  return cjson.encode({ jobId = existingJobId, status = status, existing = true })
+  -- Idempotent for queued / running / succeeded jobs; a failed job is queued again below
+  -- (same job id) so the teacher can retry after fixing the worksheet.
+  if status ~= "failed" then
+    return cjson.encode({ jobId = existingJobId, status = status, existing = true })
+  end
 end
 
 local activityRaw = redis.call("GET", KEYS[1])
@@ -30,6 +34,7 @@ redis.call("HSET", KEYS[5],
   "answers", cjson.encode(submission.answers or { submission.answer }),
   "status", "queued",
   "attempt", "0",
+  "errorCode", "",
   "createdAt", ARGV[5],
   "updatedAt", ARGV[5])
 redis.call("EXPIRE", KEYS[5], tonumber(ARGV[6]))

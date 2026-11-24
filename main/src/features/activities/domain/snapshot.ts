@@ -20,6 +20,9 @@ export interface ActivityRoundSnapshot {
   kind?: "single" | "group";
   blanks?: RoundBlankSnapshot[];
   phase: string;
+  /** When the round was opened / closed (ISO 8601); absent on rounds stored before 004. */
+  openedAt?: string;
+  closedAt?: string;
   winnerGroupId: string | null;
   submissions: ActivitySubmissionSnapshot[];
   writebackJob?: {
@@ -34,7 +37,8 @@ export interface ActivitySnapshot {
   activityId: string;
   phase: string;
   stateVersion: number;
-  currentRound: ActivityRoundSnapshot | null;
+  /** Every round of the activity (open and closed), sorted by question number. */
+  rounds: ActivityRoundSnapshot[];
 }
 
 /** Parses the `blanks` JSON stored on a round hash; rounds opened before question groups have none. */
