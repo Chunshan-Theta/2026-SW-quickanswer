@@ -11,55 +11,55 @@
 ## Phase 1: Setup
 
 - [X] T001 Record user decisions in `spec.md` Clarifications and create `diagrams/005-component|class|sequence.puml` + PNG
-- [ ] T002 [P] Make `tests/integration/writeback-queue.test.ts` use unique ids and stop deleting the shared `writeback:jobs` stream (protects the other branch and the user's worker)
+- [X] T002 [P] Make `tests/integration/writeback-queue.test.ts` use unique ids and stop deleting the shared `writeback:jobs` stream (protects the other branch and the user's worker)
 
 ## Phase 2: Foundational (blocking)
 
-- [ ] T003 [P] Unit tests for `src/features/activities/domain/answer-adoption.ts` (`defaultAdoption`, `sameAdoption`, `describeAdoption`, `adoptionIsComplete`) in `tests/unit/activities/answer-adoption.test.ts`
-- [ ] T004 [P] Schema tests for `writebackRequestSchema.selection` (group / teacher / legacy / invalid) in `tests/unit/validation/schemas.test.ts`
-- [ ] T005 Implement `answer-adoption.ts`, add `PublishedAnswerSnapshot` / `AdoptedAnswerSnapshot` to `domain/snapshot.ts`, extend `writebackRequestSchema`
+- [X] T003 [P] Unit tests for `src/features/activities/domain/answer-adoption.ts` (`defaultAdoption`, `sameAdoption`, `describeAdoption`, `adoptionIsComplete`) in `tests/unit/activities/answer-adoption.test.ts`
+- [X] T004 [P] Schema tests for `writebackRequestSchema.selection` (group / teacher / legacy / invalid) in `tests/unit/validation/schemas.test.ts`
+- [X] T005 Implement `answer-adoption.ts`, add `PublishedAnswerSnapshot` / `AdoptedAnswerSnapshot` to `domain/snapshot.ts`, extend `writebackRequestSchema`
 
 ## Phase 3: User Story 1 — 教師選擇要回填的答案 (P1)
 
 ### Tests
 
-- [ ] T006 [US1] Redis integration tests in `tests/integration/answer-adoption.test.ts`: group selection writes that group's answers; default = fastest; unknown group rejected; pending + different selection rejected; pending/succeeded + same selection idempotent; succeeded + different selection re-queued (revision 2, `previousAnswers` = published); failed re-queued
-- [ ] T007 [P] [US1] Contract tests in `tests/contract/writeback.test.ts`: selection bodies passed through, invalid selection → 422, students → 403
-- [ ] T008 [P] [US1] Writeback unit test in `tests/unit/sheets/writeback-guided-notes.test.ts`: marker cell holding the previously published answer is overwritten on re-selection; any other content still fails closed
-- [ ] T009 [P] [US1] Worker test in `tests/integration/writeback-worker.test.ts`: job `previousAnswers` passed to `prepareGuidedNotesWriteback`
+- [X] T006 [US1] Redis integration tests in `tests/integration/answer-adoption.test.ts`: group selection writes that group's answers; default = fastest; unknown group rejected; pending + different selection rejected; pending/succeeded + same selection idempotent; succeeded + different selection re-queued (revision 2, `previousAnswers` = published); failed re-queued
+- [X] T007 [P] [US1] Contract tests in `tests/contract/writeback.test.ts`: selection bodies passed through, invalid selection → 422, students → 403
+- [X] T008 [P] [US1] Writeback unit test in `tests/unit/sheets/writeback-guided-notes.test.ts`: marker cell holding the previously published answer is overwritten on re-selection; any other content still fails closed
+- [X] T009 [P] [US1] Worker test in `tests/integration/writeback-worker.test.ts`: job `previousAnswers` passed to `prepareGuidedNotesWriteback`
 
 ### Implementation
 
-- [ ] T010 [US1] Rewrite `src/server/redis/scripts/enqueue-writeback.lua` (selection, selectionKey, idempotency rules R3, revision, previousAnswers, queued event with `adopted`)
-- [ ] T011 [US1] Update `src/server/redis/writeback-queue.ts` (`enqueueWriteback(…, selection?)`, error messages, `getWritebackStatus` with `revision`/`adopted`) and the writeback route
-- [ ] T012 [US1] `prepareGuidedNotesWriteback(…, previousAnswers?)` and worker passes `jobPreviousAnswers(job)`
-- [ ] T013 [US1] Teacher UI: `src/components/teacher/answer-adoption.tsx` + closed card in `round-control.tsx`; `round-state.ts` `applyWritebackStatus` keeps `adopted` / `published`; CSS
+- [X] T010 [US1] Rewrite `src/server/redis/scripts/enqueue-writeback.lua` (selection, selectionKey, idempotency rules R3, revision, previousAnswers, queued event with `adopted`)
+- [X] T011 [US1] Update `src/server/redis/writeback-queue.ts` (`enqueueWriteback(…, selection?)`, error messages, `getWritebackStatus` with `revision`/`adopted`) and the writeback route
+- [X] T012 [US1] `prepareGuidedNotesWriteback(…, previousAnswers?)` and worker passes `jobPreviousAnswers(job)`
+- [X] T013 [US1] Teacher UI: `src/components/teacher/answer-adoption.tsx` + closed card in `round-control.tsx`; `round-state.ts` `applyWritebackStatus` keeps `adopted` / `published`; CSS
 
 ## Phase 4: User Story 2 — 學生看到自己的答案與老師採用的答案 (P1)
 
 ### Tests
 
-- [ ] T014 [US2] Integration test (same file as T006): worker success publishes `published*` on the round and the `writeback.status` event carries `published`; failure does not change the published answer
-- [ ] T015 [P] [US2] Projection tests in `tests/unit/events/activity-event-projection.test.ts`: student `results.finalized` keeps only own submission and `winnerGroupId: null`; succeeded `writeback.status` → `answer.published`; other statuses → null; teacher unchanged
-- [ ] T016 [P] [US2] Privacy tests in `tests/security/answer-privacy.test.ts` (snapshot via real Redis) and `tests/contract/results-access.test.ts`: closed round for a student contains only own submission, no winner, `publishedAnswer` only after success
-- [ ] T017 [P] [US2] Reducer tests in `tests/unit/activities/round-state.test.ts`: `applyPublishedAnswer`, `applyWritebackStatus` with `published`
+- [X] T014 [US2] Integration test (same file as T006): worker success publishes `published*` on the round and the `writeback.status` event carries `published`; failure does not change the published answer
+- [X] T015 [P] [US2] Projection tests in `tests/unit/events/activity-event-projection.test.ts`: student `results.finalized` keeps only own submission and `winnerGroupId: null`; succeeded `writeback.status` → `answer.published`; other statuses → null; teacher unchanged
+- [X] T016 [P] [US2] Privacy tests in `tests/security/answer-privacy.test.ts` (snapshot via real Redis) and `tests/contract/results-access.test.ts`: closed round for a student contains only own submission, no winner, `publishedAnswer` only after success
+- [X] T017 [P] [US2] Reducer tests in `tests/unit/activities/round-state.test.ts`: `applyPublishedAnswer`, `applyWritebackStatus` with `published`
 
 ### Implementation
 
-- [ ] T018 [US2] `update-writeback-status.lua` publishes on success (KEYS[4] round); `updateWritebackStatus` passes the round key
-- [ ] T019 [US2] `activity-event-projection.ts`, `activity-snapshot.ts`, `results-service.ts` apply the student rule and expose `publishedAnswer`
-- [ ] T020 [US2] Student UI: closed question card shows 你們的答案 / 正確答案（老師採用｜老師提供）/ 等待老師公布正確答案; `answer.published` listener; CSS
+- [X] T018 [US2] `update-writeback-status.lua` publishes on success (KEYS[4] round); `updateWritebackStatus` passes the round key
+- [X] T019 [US2] `activity-event-projection.ts`, `activity-snapshot.ts`, `results-service.ts` apply the student rule and expose `publishedAnswer`
+- [X] T020 [US2] Student UI: closed question card shows 你們的答案 / 正確答案（老師採用｜老師提供）/ 等待老師公布正確答案; `answer.published` listener; CSS
 
 ## Phase 5: User Story 3 — 教師自行輸入正確答案 (P2)
 
-- [ ] T021 [US3] Integration tests (same file as T006): teacher answers written with display text; wrong count / blank → rejected; works when nobody answered
-- [ ] T022 [US3] Lua + UI support for `source: "teacher"` (inputs per blank, button disabled until complete)
+- [X] T021 [US3] Integration tests (same file as T006): teacher answers written with display text; wrong count / blank → rejected; works when nobody answered
+- [X] T022 [US3] Lua + UI support for `source: "teacher"` (inputs per blank, button disabled until complete)
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T023 [P] Update `tests/e2e/sheets-writeback.spec.ts` for choosing a non-fastest answer and the student view (not runnable locally: Playwright browsers not installed)
-- [ ] T024 Run `pnpm typecheck`, `pnpm lint`, full Vitest suites
-- [ ] T025 Verify code ↔ `diagrams/005-*.puml` alignment and record it in `quickstart.md`
+- [X] T023 [P] Update `tests/e2e/sheets-writeback.spec.ts` for choosing a non-fastest answer and the student view (not runnable locally: Playwright browsers not installed)
+- [X] T024 Run `pnpm typecheck`, `pnpm lint`, full Vitest suites
+- [X] T025 Verify code ↔ `diagrams/005-*.puml` alignment and record it in `quickstart.md`
 
 ## Dependencies & Execution Order
 

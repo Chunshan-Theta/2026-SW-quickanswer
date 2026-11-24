@@ -38,3 +38,33 @@ pnpm exec vitest run tests/unit tests/contract tests/security tests/architecture
 ## 預期結果
 
 所有自動化檢查通過；A–D 情境符合預期。
+
+## Diagram alignment verification (T025, 2026-11-25)
+
+逐一核對 `diagrams/005-component.puml`、`005-class.puml`、`005-sequence.puml` 與實作：
+
+| 圖表元素 | 實作位置 | 結果 |
+|---|---|---|
+| Answer Adoption Panel（各組單選＋自行輸入） | `src/components/teacher/answer-adoption.tsx` | 一致 |
+| Teacher Question Board 已結束卡片 | `src/components/teacher/round-control.tsx`（`AnswerAdoptionPanel`、`queueWriteback(round, selection)`） | 一致 |
+| Student Closed Question Card（你們的答案＋正確答案） | `src/components/student/activity-round.tsx`（`answer.published` 監聽） | 一致 |
+| Answer Adoption Helpers：`defaultAdoption`／`sameAdoption`／`describeAdoption`／`adoptionIsComplete` | `src/features/activities/domain/answer-adoption.ts` | 一致 |
+| Round State Reducer：`applyWritebackStatus`（adopted／published）、`applyPublishedAnswer` | `src/features/activities/domain/round-state.ts` | 一致 |
+| Writeback Route `{ requestId, selection? }` | `writeback/route.ts`、`writebackRequestSchema` | 一致 |
+| `enqueue-writeback.lua`（selection、selectionKey、revision、previousAnswers、處理中拒絕） | `src/server/redis/scripts/enqueue-writeback.lua` | 一致 |
+| `update-writeback-status.lua`（成功才寫入 `published*` 並在事件帶 `published`） | 同名腳本；`updateWritebackStatus` 傳入 round key | 一致 |
+| Activity Snapshot／Results Service（學生：只有自己＋`publishedAnswer`） | `activity-snapshot.ts`、`results-service.ts` | 一致 |
+| SSE Projection（學生 `results.finalized` 只含自己、`answer.published`） | `src/server/events/activity-event-projection.ts` | 一致 |
+| Worker（`previousAnswers`） | `sheets-writeback.ts`（`jobPreviousAnswers`）、`prepareGuidedNotesWriteback(…, previousAnswers)` | 一致 |
+| Class：WritebackJob／RoundState／ActivityRoundSnapshot／PublishedAnswerSnapshot／AdoptedAnswer | `writeback-queue.ts`（`WritebackJob` 含 `selectionKey`）、`domain/snapshot.ts` | 一致（核對時補上 `selectionKey` 型別欄位） |
+| Sequence：處理中不同選擇 409／相同選擇 existing／改選同 job id revision+1／成功後學生收到 `answer.published`／重新整理只含自己＋公布答案 | Lua 與 `tests/integration/answer-adoption.test.ts`、`tests/security/answer-privacy.test.ts` | 一致 |
+
+## Verification results (2026-11-25)
+
+| 檢查 | 結果 |
+|---|---|
+| `pnpm typecheck`、`pnpm lint` | ✅ |
+| Vitest（unit、contract、security、architecture、integration、load） | ✅ 33 files / 205 tests |
+| SSR smoke（私用 port 3015、seeded Redis）：教師端單選清單與預設最快組別、回填按鈕、無下拉選單；學生端只見自己答案、等待公布、無他組答案與最快組別；公布後顯示「老師採用：組別」／「老師提供」 | ✅ 15/15 |
+| e2e（`tests/e2e/sheets-writeback.spec.ts` 新增 3 個 005 情境並更新既有斷言） | ⚪ 已更新；本機未安裝 Playwright 瀏覽器，未執行 |
+| 人工驗證 A–D（真實 Google Sheets） | ⚪ 待合併後於 port 3000 執行 |
