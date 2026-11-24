@@ -23,13 +23,13 @@
 
 ## Phase 2: Foundational (blocking both stories)
 
-- [ ] T002 [P] Unit tests for `tests/unit/activities/activity-lifecycle.test.ts`:
+- [X] T002 [P] Unit tests for `tests/unit/activities/activity-lifecycle.test.ts`:
   - `isActivityEnded`
   - `activityListStatus` for every phase
   - `sortTeacherActivities`: ongoing first, newest first, stable, no mutation, missing `createdAt` last within a status
   - `phaseAfterRoundsClosed`: ended is sticky, completed vs active
-- [ ] T003 Implement `src/features/activities/domain/activity-lifecycle.ts` (makes T002 pass).
-- [ ] T004 Add `ended` to `activityPhases` and add `endedAt`.
+- [X] T003 Implement `src/features/activities/domain/activity-lifecycle.ts` (makes T002 pass).
+- [X] T004 Add `ended` to `activityPhases` and add `endedAt`.
   - `src/features/activities/domain/types.ts`
   - `ActivitySnapshot.endedAt` in `src/features/activities/domain/snapshot.ts`
   - `teacherActivities` key in `src/server/redis/keyspace.ts`
@@ -46,22 +46,22 @@
 
 ### Tests for User Story 1
 
-- [ ] T005 [P] [US1] Update `tests/unit/sheets/import-guided-notes.test.ts`. The import writes the meta, `createdAt`, `sheetTitle` and the optional `spreadsheetTitle`, plus the teacher index, in one `MULTI` with the activity TTL.
-- [ ] T006 [P] [US1] Integration tests in `tests/integration/activity-lifecycle.test.ts` (real Redis, Google adapter stubbed):
+- [X] T005 [P] [US1] Update `tests/unit/sheets/import-guided-notes.test.ts`. The import writes the meta, `createdAt`, `sheetTitle` and the optional `spreadsheetTitle`, plus the teacher index, in one `MULTI` with the activity TTL.
+- [X] T006 [P] [US1] Integration tests in `tests/integration/activity-lifecycle.test.ts` (real Redis, Google adapter stubbed):
   - an import is listed for its teacher with every summary field
   - another teacher's activities are never listed
   - ongoing before ended, newest first, at most 50
   - an expired activity is removed from the index and not listed
-- [ ] T007 [P] [US1] Contract tests in `tests/contract/activity-lifecycle.test.ts` for `GET /api/teacher/activities`: 200 for the teacher (service called with the session teacher id), 401 anonymous, 403 student.
-- [ ] T008 [P] [US1] Schema test: `activityImportSchema` accepts an optional `spreadsheetTitle` (trimmed, ≤ 200) and still accepts bodies without it. Goes in `tests/unit/validation/activity-import-schema.test.ts`.
+- [X] T007 [P] [US1] Contract tests in `tests/contract/activity-lifecycle.test.ts` for `GET /api/teacher/activities`: 200 for the teacher (service called with the session teacher id), 401 anonymous, 403 student.
+- [X] T008 [P] [US1] Schema test: `activityImportSchema` accepts an optional `spreadsheetTitle` (trimmed, ≤ 200) and still accepts bodies without it. Goes in `tests/unit/validation/activity-import-schema.test.ts`.
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] `src/lib/validation/schemas.ts`: optional `spreadsheetTitle`.
-- [ ] T010 [US1] `src/features/activities/application/teacher-activities.ts`: `teacherActivityIndexCommands` (used inside the import `MULTI`) and `listTeacherActivities` (ZREVRANGE + MGET + ZREM expired + ownership re-check + summaries + sort).
-- [ ] T011 [US1] `src/features/sheets/application/import-guided-notes.ts`: `createdAt`, `sheetTitle`, `spreadsheetTitle`, and meta + index written in one `MULTI` (makes T005 and T006 pass).
-- [ ] T012 [US1] `src/app/api/teacher/activities/route.ts` (makes T007 pass).
-- [ ] T013 [US1] Server component `src/components/teacher/activity-list.tsx`, rendered on `src/app/(teacher)/teacher/import/page.tsx` for a signed-in teacher. The console's back link `src/app/(teacher)/teacher/activities/[activityId]/page.tsx` becomes 「返回教師工作區」. `guided-notes-import.tsx` sends the Picker file name. Styles go in `globals.css`.
+- [X] T009 [US1] `src/lib/validation/schemas.ts`: optional `spreadsheetTitle`.
+- [X] T010 [US1] `src/features/activities/application/teacher-activities.ts`: `listTeacherActivities` (the index `ZADD` itself is written by the import inside its `MULTI`, see T011) (ZREVRANGE + MGET + ZREM expired + ownership re-check + summaries + sort).
+- [X] T011 [US1] `src/features/sheets/application/import-guided-notes.ts`: `createdAt`, `sheetTitle`, `spreadsheetTitle`, and meta + index written in one `MULTI` (makes T005 and T006 pass).
+- [X] T012 [US1] `src/app/api/teacher/activities/route.ts` (makes T007 pass).
+- [X] T013 [US1] Server component `src/components/teacher/activity-list.tsx`, rendered on `src/app/(teacher)/teacher/import/page.tsx` for a signed-in teacher. The console's back link `src/app/(teacher)/teacher/activities/[activityId]/page.tsx` becomes 「返回教師工作區」. `guided-notes-import.tsx` sends the Picker file name. Styles go in `globals.css`.
 
 **Checkpoint**: the teacher can always get back to an activity from the workspace.
 
@@ -78,7 +78,7 @@
 
 ### Tests for User Story 2
 
-- [ ] T014 [P] [US2] Integration tests in `tests/integration/activity-lifecycle.test.ts`:
+- [X] T014 [P] [US2] Integration tests in `tests/integration/activity-lifecycle.test.ts`:
   - **Close with questions open.** Two open questions with one submission. `closeActivity` closes both, the phase becomes `ended` with `endedAt`, and no open map remains. Events: two `results.finalized`, then `activity.ended`, with contiguous versions.
   - **Close with nothing open.** A room with no open questions closes too.
   - **Idempotent.** The second call returns `alreadyEnded: true` with no new event.
@@ -86,18 +86,18 @@
   - **Stale open set.** The script reports `STALE_OPEN_ROUNDS` when an open round is missing from its keys.
   - **Rejected after ended.** Open, submit, join lookup and join are refused with the ended messages.
   - **Writeback after ended.** It can still be queued (the test cleans up its own job and stream entry).
-- [ ] T015 [P] [US2] Contract tests in `tests/contract/activity-lifecycle.test.ts` for `POST /api/activities/{id}/close`: 200 for the teacher (service called with activity id and session teacher id), 401 anonymous, 403 student, error passthrough (403/404).
-- [ ] T016 [P] [US2] Security tests in `tests/security/activity-lifecycle.test.ts`, using the real session module:
+- [X] T015 [P] [US2] Contract tests in `tests/contract/activity-lifecycle.test.ts` for `POST /api/activities/{id}/close`: 200 for the teacher (service called with activity id and session teacher id), 401 anonymous, 403 student, error passthrough (403/404).
+- [X] T016 [P] [US2] Security tests in `tests/security/activity-lifecycle.test.ts`, using the real session module:
   - a seat (student) cookie gets 403 on list and close, even in a browser that also holds the teacher cookie
   - the list ignores any `teacherId` query and uses the session teacher
-- [ ] T017 [P] [US2] Projection test: `activity.ended` reaches students unchanged, and other events keep their rules. Goes in `tests/unit/events/activity-ended-projection.test.ts` (own file; the shared projection test is left to 005).
+- [X] T017 [P] [US2] Projection test: `activity.ended` reaches students unchanged, and other events keep their rules. Goes in `tests/unit/events/activity-ended-projection.test.ts` (own file; the shared projection test is left to 005).
 
 ### Implementation for User Story 2
 
-- [ ] T018 [US2] `close-rounds.lua` mode `end-activity`. `open-rounds.lua` and `submit-answer.lua` reject `ended` (`ACTIVITY_ENDED`).
-- [ ] T019 [US2] `src/server/redis/round-store.ts`: `closeActivity` (read the open set, EVAL, retry on stale) plus the new error messages. `round-service.ts`: `closeActivityRoom`.
-- [ ] T020 [US2] `src/app/api/activities/[activityId]/close/route.ts`. `join-activity.ts` gets the ended message. `activity-snapshot.ts` and `teacher-activity.ts` expose `endedAt`. `activity-event-projection.ts` forwards `activity.ended`. (Makes T014–T017 pass.)
-- [ ] T021 [US2] UI:
+- [X] T018 [US2] `close-rounds.lua` mode `end-activity`. `open-rounds.lua` and `submit-answer.lua` reject `ended` (`ACTIVITY_ENDED`).
+- [X] T019 [US2] `src/server/redis/round-store.ts`: `closeActivity` (read the open set, EVAL, retry on stale) plus the new error messages. `round-service.ts`: `closeActivityRoom`.
+- [X] T020 [US2] `src/app/api/activities/[activityId]/close/route.ts`. `join-activity.ts` gets the ended message. `activity-snapshot.ts` and `teacher-activity.ts` expose `endedAt`. `activity-event-projection.ts` forwards `activity.ended`. (Makes T014–T017 pass.)
+- [X] T021 [US2] UI:
   - `src/components/teacher/close-room-control.tsx` (status, 「關閉房間」, in-page confirm)
   - `round-control.tsx` (join-code panel / toolbar only): `activity.ended` listener, sticky ended phase, read-only open/close when ended, writeback kept
   - `student/activity-round.tsx`: `activity.ended` listener, 「活動已結束」 banner and pill
@@ -109,10 +109,10 @@
 
 ## Phase 5: Polish & Cross-Cutting
 
-- [ ] T022 [P] E2E spec `tests/e2e/activity-lifecycle.spec.ts` (seeded Redis, teacher cookie): list → console → close room → student banner → join rejected. Not executed locally because Playwright browsers aren't installed.
-- [ ] T023 Run `pnpm typecheck`, `pnpm lint` and `pnpm exec vitest run tests/unit tests/contract tests/security tests/architecture tests/integration tests/load`. Fix any failure.
+- [X] T022 [P] E2E spec `tests/e2e/activity-lifecycle.spec.ts` (seeded Redis, teacher cookie): list → console → close room → student banner → join rejected. Not executed locally because Playwright browsers aren't installed.
+- [X] T023 Run `pnpm typecheck`, `pnpm lint` and `pnpm exec vitest run tests/unit tests/contract tests/security tests/architecture tests/integration tests/load`. Fix any failure.
 - [ ] T024 SSR smoke on a private port (not 3000) with seeded data: the workspace list renders for the teacher, the console shows 「關閉房間」, and the student page shows the ended banner.
-- [ ] T025 Verify the implementation against `diagrams/006-*.puml` and record the result in `quickstart.md`.
+- [X] T025 Verify the implementation against `diagrams/006-*.puml` and record the result in `quickstart.md`.
 
 ---
 

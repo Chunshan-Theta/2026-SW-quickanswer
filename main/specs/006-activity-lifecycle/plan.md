@@ -89,7 +89,7 @@ src/
 │   ├── domain/activity-lifecycle.ts         # NEW: pure status / order / phase helpers
 │   ├── domain/types.ts                      # CHANGED: ended phase, endedAt
 │   ├── domain/snapshot.ts                   # CHANGED: ActivitySnapshot.endedAt
-│   ├── application/teacher-activities.ts    # NEW: recordTeacherActivity / listTeacherActivities
+│   ├── application/teacher-activities.ts    # NEW: listTeacherActivities (the import writes the index in its own MULTI)
 │   ├── application/round-service.ts         # CHANGED: closeActivityRoom
 │   ├── application/activity-snapshot.ts     # CHANGED: endedAt
 │   ├── application/teacher-activity.ts      # CHANGED: endedAt

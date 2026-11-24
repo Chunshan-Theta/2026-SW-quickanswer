@@ -16,7 +16,7 @@ package "Next.js App (Node.js runtime)" {
 	component "Teacher Activities Route\nGET /api/teacher/activities" as ListAPI
 	component "Close Room Route\nPOST /api/activities/{id}/close" as CloseAPI
 	component "Import Service\n(records the activity for its teacher)" as Import
-	component "Teacher Activities Service\nrecordTeacherActivity / listTeacherActivities" as TeacherActivities
+	component "Teacher Activities Service\nlistTeacherActivities" as TeacherActivities
 	component "Round Service\ncloseActivityRoom" as RoundService
 	component "Round Store (Lua)\nclose-rounds.lua mode end-activity\nopen-rounds / submit-answer reject ended" as RoundStore
 	component "Join Service\n(rejects ended activities)" as Join
@@ -36,7 +36,7 @@ CloseUI --> CloseAPI : confirm 關閉房間
 ListAPI --> TeacherActivities
 CloseAPI --> RoundService
 RoundService --> RoundStore
-Import --> TeacherActivities : recordTeacherActivity(teacher, activity, createdAt)
+Import --> Redis : MULTI: SET meta + ZADD teacher index (createdAt)
 TeacherActivities --> Redis : ZADD / ZREVRANGE / MGET meta / ZREM expired
 RoundStore --> Redis : close every open round + phase ended + events (atomic)
 Join --> Redis : phase check

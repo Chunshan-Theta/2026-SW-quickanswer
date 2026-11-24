@@ -44,3 +44,24 @@ pnpm exec vitest run tests/unit tests/contract tests/security tests/architecture
 ## 預期結果
 
 所有自動化檢查通過；A–C 情境全部符合預期。
+
+## Diagram alignment verification (T025, 2026-11-25)
+
+逐一核對 `diagrams/006-component.puml`、`006-class.puml`、`006-sequence.puml` 與實作：
+
+| 圖表元素 | 實作位置 | 結果 |
+|---|---|---|
+| Teacher Workspace Page／Teacher Activity List | `app/(teacher)/teacher/import/page.tsx`、`components/teacher/activity-list.tsx` | 一致 |
+| Teacher Console「返回教師工作區」與房間狀態 | `app/(teacher)/teacher/activities/[activityId]/page.tsx`、`components/teacher/round-control.tsx` | 一致 |
+| Close Room Control（頁面內確認） | `components/teacher/close-room-control.tsx`（「確認關閉房間」，未使用 `window.confirm`） | 一致 |
+| Teacher Activities Route／Service | `app/api/teacher/activities/route.ts` → `listTeacherActivities`（ZREVRANGE 前 50 筆、MGET meta、ZREM 過期、依 `sortTeacherActivities` 排序） | 一致 |
+| Import Service 寫入索引 | `import-guided-notes.ts`：同一個 `MULTI` 內 SET meta＋`ZADD teacher:{id}:activities` | **修正圖表**：原圖寫成呼叫 `recordTeacherActivity`，實作是匯入流程直接在 `MULTI` 寫入。已更新 `006-component`／`006-class` 與 plan、tasks（T010） |
+| Activity Lifecycle（pure） | `domain/activity-lifecycle.ts`：`isActivityEnded`、`activityListStatus`、`sortTeacherActivities`、`phaseAfterRoundsClosed` | 一致 |
+| Close Room Route → Round Service → Round Store | `app/api/activities/[activityId]/close/route.ts` → `closeActivityRoom` → `closeActivity`（`STALE_OPEN_ROUNDS` 有限次重試） | 一致 |
+| Lua `close-rounds.lua` mode `end-activity` | 結束所有開放中題目、`phase = ended`、`endedAt`、`activity.ended` 事件；已關閉時回傳 `alreadyEnded: true` | 一致 |
+| `open-rounds.lua`／`submit-answer.lua` 拒絕 ended | `ACTIVITY_ENDED`／`ACTIVITY_ENDED_SUBMIT` → 409 | 一致 |
+| Join Service 拒絕 ended | `join-activity.ts`：「此活動已關閉，無法加入。」 | 一致 |
+| SSE 投影 `activity.ended` 給所有人 | `activity-event-projection.ts` | 一致 |
+| Student Activity Page「活動已結束」 | `components/student/activity-round.tsx` | 一致 |
+
+自動化檢查（T023）：`pnpm typecheck`、`pnpm lint` 通過；Vitest 36 個檔案、205 個測試全部通過。

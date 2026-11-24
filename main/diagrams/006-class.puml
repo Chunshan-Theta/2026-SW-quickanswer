@@ -36,9 +36,13 @@ class TeacherActivitySummary {
   endedAt?
 }
 class TeacherActivitiesService {
-  recordTeacherActivity(teacherId, activityId, createdAt)
   listTeacherActivities(teacherId) : TeacherActivitySummary[]
 }
+note right of TeacherActivitiesService
+  The import writes the index itself:
+  activity meta + ZADD teacher:{id}:activities
+  in one MULTI (import-guided-notes.ts).
+end note
 class ActivityLifecycle <<pure functions>> {
   isActivityEnded(phase)
   activityListStatus(phase) : ongoing | ended
