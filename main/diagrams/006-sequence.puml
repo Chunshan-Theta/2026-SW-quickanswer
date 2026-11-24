@@ -1,0 +1,66 @@
+@startuml
+title Sequence Diagram - 006 Returning to an Activity and Closing the Room
+
+actor Teacher
+participant "Teacher Workspace\n(我的課堂活動)" as Workspace
+participant "Teacher Console" as Console
+participant "Teacher Activities Service" as Index
+participant "Close Room Route" as CloseAPI
+participant "Round Store (Lua)" as Store
+database "Private Redis" as Redis
+participant "Activity SSE" as Sync
+actor Student
+participant "Join / Open / Submit" as Guards
+
+== Import records the activity ==
+Teacher -> Workspace : Import Guided Notes
+Workspace -> Redis : SET activity meta (createdAt, titles)\nZADD teacher:{id}:activities createdAt activityId; EXPIRE
+
+== Teacher leaves the console and comes back ==
+Teacher -> Console : (closes tab / presses back)
+note over Redis, Student : Room state stays in Redis; open questions\nstay open and students keep answering.
+Teacher -> Workspace : rail 教師工作區
+Workspace -> Index : listTeacherActivities(session teacher)
+Index -> Redis : ZREVRANGE 0..49 + MGET activity metas
+alt An activity meta has expired
+  Index -> Redis : ZREM expired ids
+end
+Index --> Workspace : summaries (ongoing first, newest first)
+Teacher -> Workspace : click the activity
+Workspace -> Console : /teacher/activities/{id}
+Console -> Sync : EventSource (snapshot + live events)
+
+== Close the room ==
+Teacher -> Console : 關閉房間
+Console --> Teacher : in-page confirm (N open questions will end)
+Teacher -> Console : 確認關閉房間
+Console -> CloseAPI : POST /api/activities/{id}/close
+CloseAPI -> Store : closeActivity(activity, teacher)
+Store -> Redis : GET activity meta (open round ids)
+Store -> Redis : EVAL close-rounds.lua mode end-activity
+alt Not the owner
+  Redis --> Store : FORBIDDEN
+  Store --> CloseAPI : 403
+else Already ended
+  Redis --> Store : { phase: ended, rounds: [], alreadyEnded: true }
+else A round was opened after the read
+  Redis --> Store : STALE_OPEN_ROUNDS
+  Store -> Redis : re-read and EVAL again (bounded retries)
+else Close
+  Redis -> Redis : close every open round (results.finalized each)\nphase = ended, endedAt, drop open map\nXADD activity.ended
+  Redis --> Store : { phase: ended, endedAt, rounds, stateVersion }
+end
+Store --> CloseAPI : result
+CloseAPI --> Console : 200 → board read-only (writeback kept)
+Sync -> Redis : read events
+Sync --> Console : results.finalized ..., activity.ended
+Sync --> Student : results.finalized ..., activity.ended → 活動已結束
+
+== After the room is closed ==
+Student -> Guards : join with code / submit answer
+Guards --> Student : 409 活動已關閉 / 此搶答回合已結束
+Teacher -> Guards : open questions
+Guards --> Teacher : 409 活動已關閉
+Teacher -> Console : 回填 a closed question
+Console -> Redis : enqueue writeback (allowed after ended)
+@enduml

@@ -1,0 +1,90 @@
+@startuml
+!pragma layout smetana
+title Class Diagram - 006 Activity Lifecycle
+
+class ActivityRecord {
+  activityId
+  teacherId
+  joinCode
+  phase : mapping_review | ready | active | completed | ended
+  createdAt
+  endedAt?
+  spreadsheetTitle?
+  sheetTitle?
+  questions[]
+  groupNames[]
+  {field} openRoundIdsByQuestion : Map<questionNumber, roundId> (absent when empty)
+  completedQuestionNumbers[]
+}
+class TeacherActivityIndex <<Redis sorted set>> {
+  key : teacher:{teacherId}:activities
+  member : activityId
+  {field} score : createdAt (ms)
+  ttl : activity TTL
+}
+class TeacherActivitySummary {
+  activityId
+  joinCode
+  phase
+  status : ongoing | ended
+  title : string | null
+  questionCount
+  openQuestionCount
+  completedQuestionCount
+  groupCount
+  createdAt
+  endedAt?
+}
+class TeacherActivitiesService {
+  recordTeacherActivity(teacherId, activityId, createdAt)
+  listTeacherActivities(teacherId) : TeacherActivitySummary[]
+}
+class ActivityLifecycle <<pure functions>> {
+  isActivityEnded(phase)
+  activityListStatus(phase) : ongoing | ended
+  sortTeacherActivities(list)
+  phaseAfterRoundsClosed(currentPhase, questionCount, closedCount)
+}
+class CloseActivityResult {
+  phase : ended
+  endedAt
+  rounds : ClosedRound[]
+  stateVersion
+  alreadyEnded : boolean
+}
+class ActivityEndedEvent {
+  type : activity.ended
+  stateVersion
+  data : { phase: ended, endedAt }
+}
+class ActivitySnapshot {
+  activityId
+  phase
+  endedAt?
+  stateVersion
+  rounds : ActivityRoundSnapshot[]
+}
+class TeacherActivityView {
+  joinCode
+  phase
+  endedAt?
+  questions[]
+  rounds[]
+}
+
+TeacherActivityIndex "1" o-- "0..*" ActivityRecord : one teacher's activities
+TeacherActivitiesService ..> TeacherActivityIndex : ZADD / ZREVRANGE / ZREM expired
+TeacherActivitiesService ..> TeacherActivitySummary : builds from ActivityRecord
+TeacherActivitiesService ..> ActivityLifecycle : status + order
+CloseActivityResult ..> ActivityRecord : close-rounds.lua (end-activity)\ncloses every open round, phase = ended
+ActivityEndedEvent ..> ActivityRecord : emitted after the rounds' results.finalized
+ActivitySnapshot ..> ActivityRecord : phase / endedAt
+TeacherActivityView ..> ActivitySnapshot
+
+note right of ActivityRecord
+  ended is terminal: join / open / submit rejected
+  (ACTIVITY_ENDED), close-room is idempotent,
+  writeback of closed rounds is still allowed.
+  The join code stays reserved until the TTL.
+end note
+@enduml

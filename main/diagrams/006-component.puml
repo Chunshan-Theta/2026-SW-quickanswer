@@ -1,0 +1,56 @@
+@startuml
+!pragma layout smetana
+title Component Diagram - 006 My Classroom Activities & Close Room
+left to right direction
+
+actor Teacher
+actor Student
+
+package "Next.js App (Node.js runtime)" {
+	component "Teacher Workspace Page\n/teacher/import\n(我的課堂活動 + import)" as Workspace
+	component "Teacher Activity List\n(server-rendered)" as ListUI
+	component "Teacher Console\n(返回教師工作區, 房間狀態)" as Console
+	component "Close Room Control\n(in-page confirm)" as CloseUI
+	component "Student Activity Page\n(活動已結束 banner)" as StudentUI
+	component "Activity Lifecycle\n<<pure>> status / sort / phase" as Lifecycle
+	component "Teacher Activities Route\nGET /api/teacher/activities" as ListAPI
+	component "Close Room Route\nPOST /api/activities/{id}/close" as CloseAPI
+	component "Import Service\n(records the activity for its teacher)" as Import
+	component "Teacher Activities Service\nrecordTeacherActivity / listTeacherActivities" as TeacherActivities
+	component "Round Service\ncloseActivityRoom" as RoundService
+	component "Round Store (Lua)\nclose-rounds.lua mode end-activity\nopen-rounds / submit-answer reject ended" as RoundStore
+	component "Join Service\n(rejects ended activities)" as Join
+	component "Activity SSE + Projection\n(activity.ended to everyone)" as Sync
+}
+
+database "Private Redis\nteacher:{teacherId}:activities (zset)\nactivity:{id}:meta phase = ended" as Redis
+
+Teacher --> Workspace : land after login / rail 教師工作區
+Workspace --> ListUI : render own activities
+ListUI --> TeacherActivities : listTeacherActivities(session teacher)
+ListUI --> Lifecycle : status label + ongoing-first order
+ListUI --> Console : link per activity
+Teacher --> Console : 返回教師工作區 / control questions
+Console --> CloseUI
+CloseUI --> CloseAPI : confirm 關閉房間
+ListAPI --> TeacherActivities
+CloseAPI --> RoundService
+RoundService --> RoundStore
+Import --> TeacherActivities : recordTeacherActivity(teacher, activity, createdAt)
+TeacherActivities --> Redis : ZADD / ZREVRANGE / MGET meta / ZREM expired
+RoundStore --> Redis : close every open round + phase ended + events (atomic)
+Join --> Redis : phase check
+Sync --> Redis : read event Stream
+Sync --> Console : results.finalized ... activity.ended
+Sync --> StudentUI : results.finalized ... activity.ended
+Student --> StudentUI : sees 活動已結束 + published results
+Console --> Lifecycle : phase stays ended
+
+note bottom of Redis
+	The index is a sorted set (score = createdAt ms) per teacher,
+	expiring with the activity; entries whose activity meta has
+	expired are removed lazily when the list is read.
+	"ended" is terminal: join, open and submit are rejected,
+	writeback of closed rounds is still allowed.
+end note
+@enduml
