@@ -111,8 +111,9 @@
 
 - [X] T022 [P] E2E spec `tests/e2e/activity-lifecycle.spec.ts` (seeded Redis, teacher cookie): list → console → close room → student banner → join rejected. Not executed locally because Playwright browsers aren't installed.
 - [X] T023 Run `pnpm typecheck`, `pnpm lint` and `pnpm exec vitest run tests/unit tests/contract tests/security tests/architecture tests/integration tests/load`. Fix any failure.
-- [ ] T024 SSR smoke on a private port (not 3000) with seeded data: the workspace list renders for the teacher, the console shows 「關閉房間」, and the student page shows the ended banner.
+- [X] T024 SSR smoke on a private port (not 3000) with seeded data: the workspace list renders for the teacher, the console shows 「關閉房間」, and the student page shows the ended banner.
 - [X] T025 Verify the implementation against `diagrams/006-*.puml` and record the result in `quickstart.md`.
+- [X] T026 Integration review: disabled `.primary-action` buttons used the busy style (wait cursor, 70% opacity), so after closing a room 「開放所選題目」 still looked clickable. Disabled primary actions now look unavailable (45% opacity, not-allowed cursor, no hover change) in `src/app/globals.css`; checked in the browser.
 
 ---
 

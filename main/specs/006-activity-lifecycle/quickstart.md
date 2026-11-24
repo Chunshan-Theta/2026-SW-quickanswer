@@ -65,3 +65,20 @@ pnpm exec vitest run tests/unit tests/contract tests/security tests/architecture
 | Student Activity Page「活動已結束」 | `components/student/activity-round.tsx` | 一致 |
 
 自動化檢查（T023）：`pnpm typecheck`、`pnpm lint` 通過；Vitest 36 個檔案、205 個測試全部通過。
+
+## Manual verification results (T024, 2026-11-25)
+
+環境：整合 005＋006 的分支，本機 port 3000 dev server＋worker＋Docker Redis，真實 Google 帳戶與雲端硬碟中的「題組_範例」複本。教師與一個學生分頁使用瀏覽器；另以 curl 模擬 teamA、teamB 各自的 seat。
+
+| 情境 | 結果 |
+|---|---|
+| A-1 匯入後開啟第 1、3 題；teamA、teamB 各自作答 | ✅ |
+| A-3/A-5 離開控制台回到教師工作區 →「我的課堂活動」顯示「進行中 · 題組_範例 · 4 題 · 2 組 · 搶答中 1 題 · KQRHAD」 | ✅ |
+| A-6 點選清單回到控制台，第 1 題回填狀態與第 3 題搶答中皆保留 | ✅ |
+| B-1 按「關閉房間」出現頁面內確認（說明 1 題開放中會結束），未使用瀏覽器原生對話框 | ✅ |
+| B-2 確認後第 3 題同時結束；控制台顯示「已關閉」，開放／結束按鈕停用（T026 修正後停用按鈕明顯變灰） | ✅ |
+| B-3 學生分頁不重新整理即顯示「活動已結束」與已結束題目 | ✅ |
+| B-4 以活動代碼查詢 →「此活動已關閉，無法加入。」 | ✅ |
+| B-5 房間關閉後回填第 3 題（老師自行輸入答案）→ 成功 | ✅ |
+| B-6 教師工作區清單顯示「已關閉」 | ✅ |
+| C 權限 | ⚪ 未用第二個 Google 帳戶操作；由 `tests/security/activity-lifecycle.test.ts` 與 contract 測試涵蓋 |
