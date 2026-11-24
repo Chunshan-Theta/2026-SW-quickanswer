@@ -43,14 +43,14 @@ else Questions valid
   ActivitySync -> StudentB : Phase-only SSE
 
   par Group A submits
-    StudentA -> API : POST answers[] for one open round (group from session)
+    StudentA -> API : POST answers[] for one open round (group from the tab's seat session)
     API -> QuizFlow : Validate phase and group
     QuizFlow -> Redis : Lua: accept once, sequence, winner, XADD
     Redis --> QuizFlow : Accepted order
     QuizFlow --> API : Submission receipt
     API --> StudentA : Own receipt only
   else Group B submits
-    StudentB -> API : POST answers[] for one open round (group from session)
+    StudentB -> API : POST answers[] for one open round (group from the tab's seat session)
     API -> QuizFlow : Validate phase and group
     QuizFlow -> Redis : Lua: accept once, sequence, winner, XADD
     Redis --> QuizFlow : Accepted order
