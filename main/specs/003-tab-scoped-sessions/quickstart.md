@@ -40,3 +40,37 @@ pnpm lint && pnpm typecheck
 ## 預期結果
 
 所有自動化檢查通過；A–C 情境全部符合預期。
+
+## Diagram alignment verification (T019, 2026-11-25)
+
+逐一核對 `diagrams/003-component.puml`、`003-class.puml`、`003-sequence.puml`：
+
+| 圖表元素 | 實作位置 | 結果 |
+|---|---|---|
+| Student Join Form → `/student/activity?seat=…` | `src/components/student/join-form.tsx`（`withSeat("/student/activity", body.seatId)`） | 一致 |
+| Student Activity Page 讀 `?seat=` | `src/app/(student)/student/activity/page.tsx` → `getStudentServerSession(seat)`，無效導向 `/join`；舊 `/activity` 導向並保留 seat | 一致 |
+| Student Activity Round（fetch＋EventSource 帶 seat） | `src/components/student/activity-round.tsx`：`withSeat(events URL)`、`seatHeaders(seat)` | 一致 |
+| Seat Transport | `src/lib/session/seat.ts`：`SEAT_HEADER`、`SEAT_QUERY_PARAM`、`seatIdPattern`、`isSeatId`、`seatHeaders`、`withSeat` | 一致 |
+| Join Route：createSeatId → pruneSeatCookies → setSeatSessionCookie，回應含 `seatId` | `src/app/api/activities/[activityId]/join/route.ts` | 一致 |
+| OAuth Callback → `qa_teacher` | `src/app/api/auth/google/callback/route.ts`（`setTeacherSessionCookie`） | 一致 |
+| Teacher Pages → `getTeacherServerSession()` | `src/app/(teacher)/teacher/import/page.tsx`、`teacher/activities/[activityId]/page.tsx` | 一致 |
+| Session Module（class 圖所列 4 個常數與 11 個函式） | `src/server/auth/session.ts`，全部匯出且名稱一致 | 一致 |
+| `SessionClaims.seatId` | `src/features/activities/domain/types.ts` | 一致 |
+| 解析規則（有 seat 只讀 `qa_seat_<seat>`、無 seat 只讀 `qa_teacher`、格式錯誤不退回） | `getRequestSession`／`requestSeat`；`tests/unit/auth/session.test.ts` | 一致 |
+| Sequence：兩分頁加入 → SSE `?seat=` → A、B 依序送出各記在自己組 → 同瀏覽器教師結束本題 → 學生呼叫教師 API 403 | `tests/integration/tab-scoped-sessions.test.ts`、`tests/security/tab-scoped-sessions.test.ts` | 一致 |
+
+未發現不一致。除了發放 cookie 的 join 與 OAuth callback 外，其他 API route 都未修改（`getRequestSession(request)` 簽章不變）。
+
+## Verification results (T018, 2026-11-25)
+
+| 指令 | 結果 |
+|---|---|
+| `pnpm typecheck`、`pnpm lint` | 通過 |
+| `pnpm test:unit` | 7 files / 49 tests 通過 |
+| `pnpm test:contract` | 9 files / 39 tests 通過 |
+| `pnpm test:security` | 2 files / 9 tests 通過 |
+| `pnpm test:integration`（本機 Redis） | 6 files / 29 tests 通過 |
+| `pnpm exec vitest run tests/architecture` | 1 file / 2 tests 通過 |
+| 回歸測試在修正前 | 新增與更新的 6 個測試檔共 30 項失敗（紅），修正後 36 項全數通過 |
+| e2e（`tests/e2e/tab-scoped-sessions.spec.ts`、更新後的 `sheets-writeback.spec.ts`） | 未執行：本機未安裝 Playwright 瀏覽器 |
+| 人工情境 A–C（T020） | 待整合時於真實瀏覽器執行 |

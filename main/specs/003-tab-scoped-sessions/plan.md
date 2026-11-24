@@ -87,6 +87,7 @@ tests/
 ├── integration/tab-scoped-sessions.test.ts           # NEW: user's two-tab scenario against Redis
 ├── integration/activity-events.test.ts               # SSE via ?seat=
 ├── security/tab-scoped-sessions.test.ts              # NEW: copied URL, cross-activity, teacher endpoints
+├── fixtures/cookie-jar.ts                            # NEW: browser-like cookie jar shared by "tabs"
 ├── load/activity-sse.test.ts                         # cookie name
 └── e2e/{sheets-writeback,tab-scoped-sessions}.spec.ts
 ```
