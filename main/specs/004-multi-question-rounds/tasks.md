@@ -17,17 +17,17 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Point SpecKit at the feature (`.specify/feature.json` → `specs/004-multi-question-rounds`), write spec/checklist/plan/research/data-model/contracts/quickstart, create `diagrams/004-component|class|sequence.puml`, update `diagrams/class.puml` and `diagrams/sequence.puml`, render all to PNG
+- [X] T001 Point SpecKit at the feature (`.specify/feature.json` → `specs/004-multi-question-rounds`), write spec/checklist/plan/research/data-model/contracts/quickstart, create `diagrams/004-component|class|sequence.puml`, update `diagrams/class.puml` and `diagrams/sequence.puml`, render all to PNG
 
 ---
 
 ## Phase 2: Foundational (blocking all stories)
 
-- [ ] T002 [P] Unit tests for the pure round-state module in `tests/unit/activities/round-state.test.ts` (open adds/sorts and is idempotent, submission upsert per round only, unknown round ignored, close sets final results, writeback status, `questionStatus` for every state, `formatElapsed`)
-- [ ] T003 [P] Unit tests for the open request schema in `tests/unit/validation/round-open-schema.test.ts` (array form, legacy form → `legacy: true`, empty / duplicate / non-numeric rejected)
-- [ ] T004 Add `openedAt` / `closedAt` to `ActivityRoundSnapshot` and replace `currentRound` with `rounds[]` in `src/features/activities/domain/snapshot.ts`
-- [ ] T005 Implement `src/features/activities/domain/round-state.ts` (make T002 pass)
-- [ ] T006 Change `roundOpenSchema` in `src/lib/validation/schemas.ts` to accept `{ questionNumbers[] }` or legacy `{ questionNumber }` (make T003 pass)
+- [X] T002 [P] Unit tests for the pure round-state module in `tests/unit/activities/round-state.test.ts` (open adds/sorts and is idempotent, submission upsert per round only, unknown round ignored, close sets final results, writeback status, `questionStatus` for every state, `formatElapsed`)
+- [X] T003 [P] Unit tests for the open request schema in `tests/unit/validation/round-open-schema.test.ts` (array form, legacy form → `legacy: true`, empty / duplicate / non-numeric rejected)
+- [X] T004 Add `openedAt` / `closedAt` to `ActivityRoundSnapshot` and replace `currentRound` with `rounds[]` in `src/features/activities/domain/snapshot.ts`
+- [X] T005 Implement `src/features/activities/domain/round-state.ts` (make T002 pass)
+- [X] T006 Change `roundOpenSchema` in `src/lib/validation/schemas.ts` to accept `{ questionNumbers[] }` or legacy `{ questionNumber }` (make T003 pass)
 
 **Checkpoint**: shared types, reducer and validation ready.
 
@@ -41,16 +41,16 @@
 
 ### Tests for User Story 1
 
-- [ ] T007 [P] [US1] Integration tests in `tests/integration/multi-round.test.ts` (unique ids): open Q1+Q2 in one call; open Q3 while Q1/Q2 open; all-or-nothing for already-open / completed / unconfirmed / unknown / duplicated question (nothing written, error names the question); close Q1 leaves Q2/Q3 open; close-all closes every open round in one call with one `results.finalized` per round; close-all with nothing open → 409; activity `completed` only after the last question closes; leftover `currentRoundId` removed; events have contiguous `stateVersion`
-- [ ] T008 [P] [US1] Migrate `tests/integration/round-atomicity.test.ts` to unique activity ids and the new store API (`openRounds`)
-- [ ] T009 [P] [US1] Contract tests in `tests/contract/rounds.test.ts`: array body → `{ rounds }`; legacy body → legacy single-round response; invalid bodies → 422; students cannot open / close / close-all; close-all uses the teacher identity
+- [X] T007 [P] [US1] Integration tests in `tests/integration/multi-round.test.ts` (unique ids): open Q1+Q2 in one call; open Q3 while Q1/Q2 open; all-or-nothing for already-open / completed / unconfirmed / unknown / duplicated question (nothing written, error names the question); close Q1 leaves Q2/Q3 open; close-all closes every open round in one call with one `results.finalized` per round; close-all with nothing open → 409; activity `completed` only after the last question closes; leftover `currentRoundId` removed; events have contiguous `stateVersion`
+- [X] T008 [P] [US1] Migrate `tests/integration/round-atomicity.test.ts` to unique activity ids and the new store API (`openRounds`)
+- [X] T009 [P] [US1] Contract tests in `tests/contract/rounds.test.ts`: array body → `{ rounds }`; legacy body → legacy single-round response; invalid bodies → 422; students cannot open / close / close-all; close-all uses the teacher identity
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] Replace `open-round.lua` with `src/server/redis/scripts/open-rounds.lua` (validate all, then open all; one `phase.changed` per round; maintain `openRoundIdsByQuestion` / `roundIdsByQuestion`; drop `currentRoundId`)
-- [ ] T011 [US1] Replace `close-round.lua` with `src/server/redis/scripts/close-rounds.lua` (strict / open-only modes; one `results.finalized` per round; remove from open map, delete the map when empty; completion rule)
-- [ ] T012 [US1] Update `src/server/redis/round-store.ts`: `openRounds`, `closeRounds`, `closeRound`, `closeAllOpenRounds`, error messages naming the question
-- [ ] T013 [US1] Update `src/features/activities/application/round-service.ts`, `src/app/api/activities/[activityId]/rounds/open/route.ts` (array + legacy response) and add `src/app/api/activities/[activityId]/rounds/close-all/route.ts`
+- [X] T010 [US1] Replace `open-round.lua` with `src/server/redis/scripts/open-rounds.lua` (validate all, then open all; one `phase.changed` per round; maintain `openRoundIdsByQuestion` / `roundIdsByQuestion`; drop `currentRoundId`)
+- [X] T011 [US1] Replace `close-round.lua` with `src/server/redis/scripts/close-rounds.lua` (strict / open-only modes; one `results.finalized` per round; remove from open map, delete the map when empty; completion rule)
+- [X] T012 [US1] Update `src/server/redis/round-store.ts`: `openRounds`, `closeRounds`, `closeRound`, `closeAllOpenRounds`, error messages naming the question
+- [X] T013 [US1] Update `src/features/activities/application/round-service.ts`, `src/app/api/activities/[activityId]/rounds/open/route.ts` (array + legacy response) and add `src/app/api/activities/[activityId]/rounds/close-all/route.ts`
 
 **Checkpoint**: T007–T009 pass.
 
@@ -64,16 +64,16 @@
 
 ### Tests for User Story 2
 
-- [ ] T014 [P] [US2] Add to `tests/integration/multi-round.test.ts`: two groups answering two open rounds get independent orders/winners; after Q1 closes, a Q1 submission is rejected while a Q2 submission is accepted
-- [ ] T015 [P] [US2] Update `tests/integration/activity-events.test.ts`: snapshot `rounds[]` with one open and one closed round — student sees only own answer in the open round and all answers in the closed round; teacher sees all
-- [ ] T016 [P] [US2] Update the snapshot mock shape in `tests/contract/activity-events-replay.test.ts`
+- [X] T014 [P] [US2] Add to `tests/integration/multi-round.test.ts`: two groups answering two open rounds get independent orders/winners; after Q1 closes, a Q1 submission is rejected while a Q2 submission is accepted
+- [X] T015 [P] [US2] Update `tests/integration/activity-events.test.ts`: snapshot `rounds[]` with one open and one closed round — student sees only own answer in the open round and all answers in the closed round; teacher sees all
+- [X] T016 [P] [US2] Update the snapshot mock shape in `tests/contract/activity-events-replay.test.ts`
 
 ### Implementation for User Story 2
 
-- [ ] T017 [US2] `src/server/redis/scripts/submit-answer.lua`: accept the round only when `openRoundIdsByQuestion[round.questionNumber] == roundId`
-- [ ] T018 [US2] `src/features/activities/application/activity-snapshot.ts`: load every round of the activity into `rounds[]` (per-round visibility, teacher writeback job, `openedAt`/`closedAt`)
-- [ ] T019 [US2] Student UI: `src/components/student/student-api.ts` (events URL + submit in one place), rewrite `src/components/student/activity-round.tsx` (stacked open-question cards, per-round drafts/busy/errors, closed results), per-round field ids in `src/components/student/answer-form.tsx`
-- [ ] T020 [US2] Student card styles in `src/app/globals.css`
+- [X] T017 [US2] `src/server/redis/scripts/submit-answer.lua`: accept the round only when `openRoundIdsByQuestion[round.questionNumber] == roundId`
+- [X] T018 [US2] `src/features/activities/application/activity-snapshot.ts`: load every round of the activity into `rounds[]` (per-round visibility, teacher writeback job, `openedAt`/`closedAt`)
+- [X] T019 [US2] Student UI: `src/components/student/student-api.ts` (events URL + submit in one place), rewrite `src/components/student/activity-round.tsx` (stacked open-question cards, per-round drafts/busy/errors, closed results), per-round field ids in `src/components/student/answer-form.tsx`
+- [X] T020 [US2] Student card styles in `src/app/globals.css`
 
 **Checkpoint**: T014–T016 pass.
 
@@ -87,15 +87,15 @@
 
 ### Tests for User Story 3
 
-- [ ] T021 [P] [US3] Add to `tests/integration/writeback-queue.test.ts`: a `failed` job is re-queued with the same id (`status=queued`, `attempt=0`, no error code, new stream entry); `queued` / `succeeded` jobs stay idempotent
+- [X] T021 [P] [US3] Add to `tests/integration/writeback-queue.test.ts`: a `failed` job is re-queued with the same id (`status=queued`, `attempt=0`, no error code, new stream entry); `queued` / `succeeded` jobs stay idempotent
 
 ### Implementation for User Story 3
 
-- [ ] T022 [US3] `src/server/redis/scripts/enqueue-writeback.lua`: re-queue when the existing job failed
-- [ ] T023 [US3] `src/features/activities/application/teacher-activity.ts`: return `rounds[]` (merge `currentRound` / `completedRounds`)
-- [ ] T024 [US3] Rewrite `src/components/teacher/round-control.tsx` as the question board (toolbar, selectable cards, live ranking, close one / all, writeback + retry, elapsed timer, no `<select>`)
-- [ ] T025 [US3] Board, card and badge styles in `src/app/globals.css` (wrapping prompts, sticky toolbar, 360px layout); remove styles only used by the old dropdown panel
-- [ ] T026 [US3] Teacher page copy in `src/app/(teacher)/teacher/activities/[activityId]/page.tsx`
+- [X] T022 [US3] `src/server/redis/scripts/enqueue-writeback.lua`: re-queue when the existing job failed
+- [X] T023 [US3] `src/features/activities/application/teacher-activity.ts`: return `rounds[]` (merge `currentRound` / `completedRounds`)
+- [X] T024 [US3] Rewrite `src/components/teacher/round-control.tsx` as the question board (toolbar, selectable cards, live ranking, close one / all, writeback + retry, elapsed timer, no `<select>`)
+- [X] T025 [US3] Board, card and badge styles in `src/app/globals.css` (wrapping prompts, sticky toolbar, 360px layout); remove styles only used by the old dropdown panel
+- [X] T026 [US3] Teacher page copy in `src/app/(teacher)/teacher/activities/[activityId]/page.tsx`
 
 **Checkpoint**: T021 passes; teacher board renders every status.
 
@@ -103,10 +103,10 @@
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T027 [P] Update `tests/e2e/sheets-writeback.spec.ts` for the card UI (checkbox + 開放所選題目) and add a multi-question flow (open Q1+Q2, groups answer different questions, close all). Not executable locally (no Playwright browsers)
-- [ ] T028 [P] Remove the obsolete `currentRoundId` seed field from `tests/load/activity-sse.test.ts`
-- [ ] T029 Run `pnpm typecheck`, `pnpm lint`, `pnpm test:unit`, `pnpm test:contract`, `pnpm test:security`, `pnpm test:integration`, `pnpm exec vitest run tests/architecture`
-- [ ] T030 Verify the implementation against `diagrams/004-*.puml`, `class.puml`, `sequence.puml` and record the result in `quickstart.md`
+- [X] T027 [P] Update `tests/e2e/sheets-writeback.spec.ts` for the card UI (checkbox + 開放所選題目) and add a multi-question flow (open Q1+Q2, groups answer different questions, close all). Not executable locally (no Playwright browsers)
+- [X] T028 [P] Remove the obsolete `currentRoundId` seed field from `tests/load/activity-sse.test.ts`
+- [X] T029 Run `pnpm typecheck`, `pnpm lint`, `pnpm test:unit`, `pnpm test:contract`, `pnpm test:security`, `pnpm test:integration`, `pnpm exec vitest run tests/architecture`
+- [X] T030 Verify the implementation against `diagrams/004-*.puml`, `class.puml`, `sequence.puml` and record the result in `quickstart.md`
 
 ---
 

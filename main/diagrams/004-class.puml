@@ -64,10 +64,13 @@ class ActivityRoundSnapshot {
 class TeacherActivityView {
   joinCode
   groupNames[]
+  completedQuestionNumbers[]
   questions[]
   rounds : ActivityRoundSnapshot[]
 }
 class RoundState <<pure functions>> {
+  sortRounds()
+  roundsByQuestion()
   applyRoundOpened()
   applySubmission()
   applyRoundClosed()

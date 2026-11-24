@@ -45,3 +45,42 @@ pnpm lint && pnpm typecheck
 ## 預期結果
 
 所有自動化檢查通過；A–D 情境全部符合預期。
+
+## Diagram alignment verification (T030, 2026-11-25)
+
+逐一核對 `diagrams/004-component.puml`、`004-class.puml`、`004-sequence.puml` 與更新後的 `class.puml`、`sequence.puml`：
+
+| 圖表元素 | 實作位置 | 結果 |
+|---|---|---|
+| Teacher Question Board（卡片清單＋固定工具列、無下拉選單） | `src/components/teacher/round-control.tsx`、`globals.css`（`.question-board*`、`.question-card*`、`.status-badge*`） | 一致 |
+| Student Open Questions（每個開放回合一張卡片＋已公布結果） | `src/components/student/activity-round.tsx`、`answer-form.tsx`（`fieldIdPrefix`） | 一致 |
+| Round State Reducer（兩端共用純函式） | `src/features/activities/domain/round-state.ts`：`sortRounds`、`roundsByQuestion`、`applyRoundOpened`、`applySubmission`、`applyRoundClosed`、`applyWritebackStatus`、`questionStatus`、`formatElapsed` | 一致（類別圖已補上 `sortRounds`／`roundsByQuestion`） |
+| Student API Client（events URL＋submit 集中一處） | `src/components/student/student-api.ts` | 一致 |
+| Open Route `{questionNumbers[]} \| {questionNumber}` | `rounds/open/route.ts`＋`roundOpenSchema`（`legacy` 決定回應格式） | 一致 |
+| Close Route / Close-All Route | `rounds/[roundId]/close/route.ts`（不變）、`rounds/close-all/route.ts`（新增） | 一致 |
+| Writeback Route（失敗可重新排入） | `enqueue-writeback.lua`（`failed` 時以同一 jobId 重排） | 一致 |
+| Round Service / Round Store (Lua) | `round-service.ts`；`round-store.ts`：`openRounds`、`submitAnswer`、`closeRound`、`closeAllOpenRounds`；`open-rounds.lua`、`submit-answer.lua`、`close-rounds.lua` | 一致 |
+| Activity Snapshot `rounds[]` | `activity-snapshot.ts`（逐回合可見性、教師回填狀態、`openedAt`/`closedAt`）、`teacher-activity.ts` | 一致 |
+| Activity SSE + Projection（逐回合隱私） | `events/route.ts`、`activity-event-projection.ts`（未變更，事件皆帶 `roundId`） | 一致 |
+| Class：`ActivityRecord.openRoundIdsByQuestion`（空時移除）、`Round`、`Submission`、`OpenRoundsInput`／`OpenRoundsResult`／`CloseRoundsResult`、`ActivitySnapshot.rounds`、`ActivityRoundSnapshot.openedAt/closedAt`、`TeacherActivityView`、`QuestionStatus` | Lua 腳本、`round-store.ts` 型別、`snapshot.ts`、`types.ts`、`round-state.ts` | 一致 |
+| Sequence：多題原子開放（錯誤指出題號、全部不開）→ 每回合一個 `phase.changed` → 各題獨立受理（open map 檢查）→ 加開 → 單題結束（strict）→ 已結束題目遲到答案 409、其他題照常 → 一次結束（讀取 open map 後 open-only）→ 全部結束才 completed → 逐題回填／失敗重排 | 程式流程與 `tests/integration/multi-round.test.ts`、`writeback-queue.test.ts` | 一致 |
+| 共用 `class.puml`（Activity.openRoundIdsByQuestion、每題至多一個回合）／`sequence.puml`（多題開放、單題或全部結束、失敗回填重排） | 同上 | 一致 |
+
+未發現其他不一致。
+
+## Automated verification results (T029, 2026-11-25)
+
+| 指令 | 結果 |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm lint` | ✅ |
+| `pnpm test:unit` | ✅ 8 files / 56 tests |
+| `pnpm test:contract` | ✅ 9 files / 39 tests |
+| `pnpm test:security` | ✅ 1 file / 2 tests |
+| `pnpm test:integration`（本機 Redis） | ✅ 6 files / 44 tests |
+| `pnpm exec vitest run tests/architecture` | ✅ 1 file / 2 tests |
+| `pnpm test:load` | ✅ 1 file / 1 test |
+| SSR smoke（私有連接埠 3014、種入 2 題開放＋1 題已結束＋1 題未確認＋1 題未開放） | ✅ 教師頁無 `<select>`、只有未開放題目有勾選框、兩張開放卡片有即時排名、長題目完整輸出、已結束卡片有得獎組別與回填；學生頁兩張開放卡片、欄位 id 不重複、只看到自己組答案、已公布結果完整 |
+
+- `tests/e2e/sheets-writeback.spec.ts` 已更新（卡片勾選＋「開放所選題目」，新增多題同時開放／一次結束情境），但本機未安裝 Playwright 瀏覽器，尚未執行。
+- 人工驗證情境 A–D 需在合併 003（同一瀏覽器多分頁身分）後，以真實 Google 試算表執行。
