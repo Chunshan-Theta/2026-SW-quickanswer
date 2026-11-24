@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Check, LoaderCircle, RadioTower } from "lucide-react";
+import { withSeat } from "@/lib/session/seat";
 
 type Lookup = { activityId: string; phase: string; groupNames: string[] };
 type ApiError = { error?: { message?: string } };
@@ -45,9 +46,10 @@ export function StudentJoinForm({ initialCode = "" }: { initialCode?: string }) 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ joinCode: joinCode.trim().toUpperCase(), groupId, displayName }),
       });
-      const body = await response.json() as ApiError;
-      if (!response.ok) throw new Error(body.error?.message ?? "無法加入活動。");
-      router.replace("/student/activity");
+      const body = await response.json() as ApiError & { seatId?: string };
+      if (!response.ok || !body.seatId) throw new Error(body.error?.message ?? "無法加入活動。");
+      // The seat in the URL keeps this tab bound to the group it joined, even with other tabs open.
+      router.replace(withSeat("/student/activity", body.seatId));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "目前無法加入活動，請稍後重試。");
     } finally {

@@ -3,13 +3,16 @@ import { ArrowLeft, Layers3, RadioTower } from "lucide-react";
 import { redirect } from "next/navigation";
 import { StudentActivityRound } from "@/components/student/activity-round";
 import { getActivitySnapshot } from "@/features/activities/application/activity-snapshot";
-import { getServerSession } from "@/server/auth/session";
+import { getStudentServerSession } from "@/server/auth/session";
 
 export const runtime = "nodejs";
 
-export default async function StudentActivityPage() {
-  const session = await getServerSession();
-  if (!session || session.role !== "student" || !session.activityId || !session.groupId) redirect("/join");
+export default async function StudentActivityPage({ searchParams }: { searchParams: Promise<{ seat?: string | string[] }> }) {
+  // The tab's seat (from the join redirect) selects this tab's own group identity.
+  const { seat: seatParam } = await searchParams;
+  const seat = typeof seatParam === "string" ? seatParam : undefined;
+  const session = await getStudentServerSession(seat);
+  if (!seat || !session?.activityId || !session.groupId) redirect("/join");
   const snapshot = await getActivitySnapshot(session.activityId, session);
 
   return (
@@ -38,7 +41,7 @@ export default async function StudentActivityPage() {
             </div>
             <span className="date-stamp">活動階段由伺服器同步</span>
           </div>
-          <StudentActivityRound activityId={session.activityId} groupId={session.groupId} initialSnapshot={snapshot} />
+          <StudentActivityRound activityId={session.activityId} groupId={session.groupId} seat={seat} initialSnapshot={snapshot} />
         </div>
       </section>
     </main>

@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { ArrowLeft, ArrowUpRight, Layers3, RadioTower } from "lucide-react";
 import { TeacherGuidedNotesImport } from "@/components/teacher/guided-notes-import";
-import { getServerSession } from "@/server/auth/session";
+import { getTeacherServerSession } from "@/server/auth/session";
 
 export const runtime = "nodejs";
 
 export default async function TeacherImportPage() {
-  const session = await getServerSession();
+  const session = await getTeacherServerSession();
   const isTeacher = session?.role === "teacher";
 
   return (

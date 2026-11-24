@@ -22,7 +22,7 @@ vi.mock("@/server/auth/google-token-store", () => ({ getGoogleTokens: mocks.getG
 import { GET as start } from "@/app/api/auth/google/start/route";
 import { GET as callback } from "@/app/api/auth/google/callback/route";
 import { GET as pickerToken } from "@/app/api/auth/google/picker-token/route";
-import { signSession } from "@/server/auth/session";
+import { createSeatId, signSession } from "@/server/auth/session";
 
 describe("Google OAuth", () => {
   beforeEach(() => {
@@ -70,7 +70,8 @@ describe("Google OAuth", () => {
     expect(response.status).toBe(307);
     expect(mocks.getToken).toHaveBeenCalledWith(expect.objectContaining({ code: "auth-code", codeVerifier: expect.any(String) }));
     expect(mocks.saveGoogleTokens).toHaveBeenCalledWith("teacher-id", expect.objectContaining({ refresh_token: "refresh-token" }));
-    expect(response.headers.get("set-cookie")).toContain("classroom_session=");
+    expect(response.headers.get("set-cookie")).toContain("qa_teacher=");
+    expect(response.headers.get("set-cookie")).not.toContain("classroom_session=");
     expect(response.headers.get("location")).toContain("/teacher/import");
   });
 
@@ -92,7 +93,7 @@ describe("Google OAuth", () => {
     mocks.getGoogleTokens.mockResolvedValue({ access_token: "expired-token", refresh_token: "server-only-refresh-token" });
     const cookie = signSession({ sub: "teacher-id", role: "teacher" });
     const response = await pickerToken(new Request("http://localhost:3000/api/auth/google/picker-token", {
-      headers: { cookie: `classroom_session=${cookie}` },
+      headers: { cookie: `qa_teacher=${cookie}` },
     }));
 
     expect(response.status).toBe(200);
@@ -104,12 +105,23 @@ describe("Google OAuth", () => {
   });
 
   it("denies Picker access tokens to student sessions", async () => {
-    const cookie = signSession({ sub: "student-id", role: "student", activityId: "activity-1", groupId: "Blue" });
+    const seat = createSeatId();
+    const cookie = signSession({ sub: "student-id", role: "student", activityId: "activity-1", groupId: "Blue", seatId: seat });
+    const response = await pickerToken(new Request("http://localhost:3000/api/auth/google/picker-token", {
+      headers: { cookie: `qa_seat_${seat}=${cookie}`, "x-quickanswer-seat": seat },
+    }));
+
+    expect(response.status).toBe(403);
+    expect(mocks.getGoogleTokens).not.toHaveBeenCalled();
+  });
+
+  it("no longer accepts the legacy shared session cookie", async () => {
+    const cookie = signSession({ sub: "teacher-id", role: "teacher" });
     const response = await pickerToken(new Request("http://localhost:3000/api/auth/google/picker-token", {
       headers: { cookie: `classroom_session=${cookie}` },
     }));
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
     expect(mocks.getGoogleTokens).not.toHaveBeenCalled();
   });
 });

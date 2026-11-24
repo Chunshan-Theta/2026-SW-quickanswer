@@ -4,12 +4,13 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Check, RadioTower } from "lucide-react";
 import { StudentAnswerForm } from "@/components/student/answer-form";
 import { SubmissionAnswer } from "@/components/shared/submission-answer";
+import { seatHeaders, withSeat } from "@/lib/session/seat";
 import type { ActivitySnapshot, ActivitySubmissionSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
 
 type Submission = ActivitySubmissionSnapshot;
 export type Snapshot = ActivitySnapshot;
 
-export function StudentActivityRound({ activityId, groupId, initialSnapshot }: { activityId: string; groupId: string; initialSnapshot: Snapshot }) {
+export function StudentActivityRound({ activityId, groupId, seat, initialSnapshot }: { activityId: string; groupId: string; seat: string; initialSnapshot: Snapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [answers, setAnswers] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -17,7 +18,7 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const stream = new EventSource(`/api/activities/${activityId}/events`);
+    const stream = new EventSource(withSeat(`/api/activities/${activityId}/events`, seat));
     stream.onopen = () => setConnected(true);
     stream.onerror = () => setConnected(false);
     stream.addEventListener("activity.snapshot", (message) => {
@@ -47,7 +48,7 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
       }));
     });
     return () => stream.close();
-  }, [activityId]);
+  }, [activityId, seat]);
 
   const currentRound = snapshot.currentRound;
   const blanks: RoundBlankSnapshot[] = currentRound?.blanks?.length ? currentRound.blanks : [{ label: null, prompt: currentRound?.prompt ?? "" }];
@@ -61,7 +62,7 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
     try {
       const response = await fetch(`/api/activities/${activityId}/rounds/${round.roundId}/submissions`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...seatHeaders(seat) },
         body: JSON.stringify({ answers: blanks.map((_, index) => (answers[index] ?? "").trim()), requestId: crypto.randomUUID() }),
       });
       const body = await response.json() as { error?: { message?: string } };

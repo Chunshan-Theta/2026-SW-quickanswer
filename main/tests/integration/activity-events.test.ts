@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createClient, type RedisClientType } from "redis";
 import { GET } from "@/app/api/activities/[activityId]/events/route";
-import { signSession } from "@/server/auth/session";
+import { withSeat } from "@/lib/session/seat";
+import { createSeatId, signSession } from "@/server/auth/session";
 import { redisKeys } from "@/server/redis/keyspace";
 
 const activityId = "event-privacy-test";
@@ -10,8 +11,11 @@ const roundId = "round-event-test";
 let redis: RedisClientType;
 
 async function readSnapshot(role: "teacher" | "student", groupId?: string) {
-  const cookie = signSession({ sub: role === "teacher" ? teacherId : "student-event-test", role, activityId, ...(groupId ? { groupId } : {}) });
-  const response = await GET(new Request(`http://localhost/api/activities/${activityId}/events`, { headers: { cookie: `classroom_session=${cookie}` } }), { params: Promise.resolve({ activityId }) });
+  // Teacher: `qa_teacher`, no seat. Student: the seat's own cookie, selected by `?seat=` as EventSource does.
+  const seat = role === "student" ? createSeatId() : undefined;
+  const token = signSession({ sub: role === "teacher" ? teacherId : "student-event-test", role, activityId, ...(groupId ? { groupId } : {}), ...(seat ? { seatId: seat } : {}) });
+  const url = `http://localhost/api/activities/${activityId}/events`;
+  const response = await GET(new Request(seat ? withSeat(url, seat) : url, { headers: { cookie: seat ? `qa_seat_${seat}=${token}` : `qa_teacher=${token}` } }), { params: Promise.resolve({ activityId }) });
   expect(response.headers.get("content-type")).toContain("text/event-stream");
   const reader = response.body!.getReader();
   const first = await reader.read();
