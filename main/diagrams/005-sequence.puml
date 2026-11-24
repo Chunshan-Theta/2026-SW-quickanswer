@@ -1,0 +1,61 @@
+@startuml
+title Sequence Diagram - 005 Teacher-Selected Writeback Answer
+
+actor Teacher
+participant "Teacher Question Board\n+ Answer Adoption Panel" as Board
+participant "Writeback Route" as API
+participant "enqueue-writeback.lua" as Queue
+database "Private Redis" as Redis
+participant "Sheets Writeback Worker" as Worker
+participant "update-writeback-status.lua" as Status
+participant "Activity SSE + Projection" as Sync
+participant "Student A" as StudentA
+participant "Student B" as StudentB
+
+== Question closes ==
+Sync -> StudentA : results.finalized (only A's own submission, no winner)
+Sync -> StudentB : results.finalized (only B's own submission, no winner)
+StudentA -> StudentA : 你們的答案 + 等待老師公布正確答案
+
+== Teacher adopts B's answer ==
+Teacher -> Board : Select B (fastest A preselected), press 回填所選答案
+Board -> API : POST writeback { requestId, selection: { source: group, groupId: B } }
+API -> API : validate body (group id or answers[])
+API -> Queue : enqueue(selectionJSON)
+Queue -> Redis : round closed? B submitted?
+alt latest job pending with a different selection
+  Queue --> API : WRITEBACK_IN_PROGRESS
+  API --> Board : 409 回填處理中
+else same selection and job pending / succeeded
+  Queue --> API : existing job
+  API --> Board : 202 existing (no new write)
+else new or changed selection (or failed)
+  Queue -> Redis : HSET job adopted*, selectionKey, previousAnswers,\nrevision+1, status=queued; XADD writeback:jobs
+  Queue -> Redis : XADD writeback.status queued { adopted }
+  Queue --> API : { jobId, status: queued, adopted }
+  API --> Board : 202
+end
+
+Worker -> Redis : read job
+Worker -> Worker : prepare targets (cell may hold previousAnswers)
+Worker -> Worker : RAW write + verify
+Worker -> Status : succeeded
+Status -> Redis : HSET round published* from job
+Status -> Redis : XADD writeback.status succeeded { published }
+Sync -> Board : writeback.status (已回填：B 的答案)
+Sync -> StudentA : answer.published { source: group, groupId: B, answers }
+Sync -> StudentB : answer.published { source: group, groupId: B, answers }
+StudentA -> StudentA : 你們的答案 + 正確答案（老師採用）B
+
+== Teacher re-selects a typed answer ==
+Teacher -> Board : 自行輸入正確答案, press 重新回填
+Board -> API : POST writeback { selection: { source: teacher, answers[] } }
+API -> Queue : enqueue (selection differs, last job succeeded)
+Queue -> Redis : requeue same job id, revision 2
+Worker -> Status : succeeded
+Sync -> StudentA : answer.published { source: teacher, groupId: null } (老師提供)
+
+== Reload ==
+StudentB -> Sync : GET events (snapshot)
+Sync -> StudentB : rounds[] with own submission + publishedAnswer only
+@enduml

@@ -1,0 +1,51 @@
+@startuml
+!pragma layout smetana
+title Component Diagram - 005 Teacher-Selected Writeback Answer
+left to right direction
+
+actor Teacher
+actor Student
+
+package "Next.js App (Node.js runtime)" {
+	component "Teacher Question Board\n(closed card)" as BoardUI
+	component "Answer Adoption Panel\n(radio per group + 自行輸入)" as AdoptionUI
+	component "Student Closed Question Card\n(你們的答案 + 正確答案)" as StudentUI
+	component "Answer Adoption Helpers\n(pure: default / same / describe)" as Adoption
+	component "Round State Reducer\n(applyWritebackStatus / applyPublishedAnswer)" as Reducer
+	component "Writeback Route\nPOST rounds/{roundId}/writeback\n{ requestId, selection? }" as WritebackAPI
+	component "Writeback Queue\nenqueue-writeback.lua\n(selection, revision, idempotency)" as Queue
+	component "Writeback Status\nupdate-writeback-status.lua\n(publish on success)" as Status
+	component "Activity Snapshot / Results Service\n(student: own answer + published answer)" as Snapshot
+	component "Activity SSE + Projection\n(results.finalized own-only,\nwriteback.status -> answer.published)" as Sync
+}
+
+component "Sheets Writeback Worker\n(previousAnswers accepted in cell)" as Worker
+database "Private Redis\nwriteback:job:{activity}:{round}\nround:{id}:state published*" as Redis
+cloud "Teacher's Guided Notes Sheet" as Sheet
+
+Teacher --> BoardUI : Pick a group's answer or type one
+BoardUI --> AdoptionUI
+AdoptionUI --> Adoption
+AdoptionUI --> WritebackAPI : selection
+WritebackAPI --> Queue
+Queue --> Redis : job (adopted*, selectionKey, revision)
+Worker --> Redis : read job / ack
+Worker --> Sheet : RAW write adopted answers
+Worker --> Status : succeeded / failed
+Status --> Redis : round published* + writeback.status event
+Sync --> Redis : read event Stream
+Sync --> BoardUI : writeback.status (adopted, published)
+Sync --> StudentUI : answer.published (own group never leaks)
+Snapshot --> Redis
+StudentUI --> Snapshot : reload
+StudentUI --> Reducer
+BoardUI --> Reducer
+Student --> StudentUI
+
+note right of Sync
+  Students: closed rounds carry only their own
+  submission; winnerGroupId is never sent.
+  The adopted answer is shown only after
+  a writeback has succeeded.
+end note
+@enduml
