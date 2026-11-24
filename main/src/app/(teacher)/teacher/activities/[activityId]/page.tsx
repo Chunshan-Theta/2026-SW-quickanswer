@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { ArrowLeft, Layers3, RadioTower } from "lucide-react";
 import { redirect } from "next/navigation";
-import { getServerSession } from "@/server/auth/session";
+import { getTeacherServerSession } from "@/server/auth/session";
 import { getTeacherActivity } from "@/features/activities/application/teacher-activity";
 import { TeacherRoundControl } from "@/components/teacher/round-control";
 
 export const runtime = "nodejs";
 
 export default async function TeacherActivityPage({ params }: { params: Promise<{ activityId: string }> }) {
-  const session = await getServerSession();
+  const session = await getTeacherServerSession();
   if (!session || session.role !== "teacher") redirect("/teacher/import");
   const { activityId } = await params;
   const activity = await getTeacherActivity(activityId, session);

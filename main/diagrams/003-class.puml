@@ -1,0 +1,72 @@
+@startuml
+title Class Diagram - 003 Tab-Scoped Sessions
+
+class SessionClaims <<domain/types.ts>> {
+	sub : string
+	role : "teacher" | "student"
+	activityId? : string
+	groupId? : string
+	seatId? : string
+	exp : number
+}
+
+class SeatTransport <<lib/session/seat.ts>> {
+	{static} SEAT_HEADER = "x-quickanswer-seat"
+	{static} SEAT_QUERY_PARAM = "seat"
+	{static} seatIdPattern = /^[A-Za-z0-9~_-]{22}$/
+	{static} isSeatId(value) : boolean
+	{static} seatHeaders(seat) : Record<string, string>
+	{static} withSeat(path, seat) : string
+}
+
+class SessionModule <<server/auth/session.ts>> {
+	{static} TEACHER_COOKIE = "qa_teacher"
+	{static} SEAT_COOKIE_PREFIX = "qa_seat_"
+	{static} MAX_SEAT_COOKIES = 10
+	{static} SESSION_TTL_SECONDS = 28800
+	{static} signSession(claims) : string
+	{static} verifySession(token) : SessionClaims | null
+	{static} createSeatId() : string
+	{static} seatCookieName(seat) : string
+	{static} requestSeat(request) : string | null | undefined
+	{static} getRequestSession(request) : SessionClaims | null
+	{static} getTeacherServerSession() : SessionClaims | null
+	{static} getStudentServerSession(seat) : SessionClaims | null
+	{static} setTeacherSessionCookie(response, token)
+	{static} setSeatSessionCookie(response, seat, token)
+	{static} pruneSeatCookies(request, response)
+}
+
+class TeacherSessionCookie <<cookie qa_teacher>> {
+	value : signed SessionClaims (role = teacher)
+	HttpOnly ; SameSite=Lax ; Path=/ ; Max-Age=8h
+}
+
+class SeatSessionCookie <<cookie qa_seat_{seatId}>> {
+	value : signed SessionClaims (role = student, seatId)
+	HttpOnly ; SameSite=Lax ; Path=/ ; Max-Age=8h
+}
+
+class JoinResponse <<POST /api/activities/{id}/join>> {
+	activityId : string
+	groupId : string
+	displayName : string
+	phase : string
+	seatId : string  <<new>>
+}
+
+class StudentActivityRound <<components/student>> {
+	activityId : string
+	groupId : string
+	seat : string  <<new>>
+	initialSnapshot : ActivitySnapshot
+}
+
+SessionModule ..> SeatTransport : uses header/query names,\nseatIdPattern
+SessionModule --> TeacherSessionCookie : reads / writes
+SessionModule --> SeatSessionCookie : reads / writes / prunes
+TeacherSessionCookie --> SessionClaims
+SeatSessionCookie --> SessionClaims
+JoinResponse ..> SeatSessionCookie : issued together
+StudentActivityRound ..> SeatTransport : seatHeaders / withSeat
+@enduml

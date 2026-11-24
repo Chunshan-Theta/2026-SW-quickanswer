@@ -37,6 +37,8 @@ export interface SessionClaims {
   role: UserRole;
   activityId?: string;
   groupId?: string;
+  /** Student sessions only: the tab-scoped seat this identity was issued for. */
+  seatId?: string;
   exp: number;
 }
 

@@ -1,0 +1,49 @@
+@startuml
+!pragma layout smetana
+title Component Diagram - 003 Tab-Scoped Sessions (one browser, many groups)
+left to right direction
+
+actor Teacher
+actor "Student tab A" as TabA
+actor "Student tab B" as TabB
+
+package "Browser (one cookie jar)" {
+	component "Cookie jar\nqa_teacher\nqa_seat_<seatA>\nqa_seat_<seatB>\n(all HttpOnly)" as Jar
+}
+
+package "Next.js App (Node.js runtime)" {
+	component "Student Join Form\n→ /student/activity?seat=…" as JoinUI
+	component "Student Activity Page (SSR)\nreads ?seat=" as StudentPage
+	component "Student Activity Round\n(fetch + EventSource)" as RoundUI
+	component "Seat Transport\nlib/session/seat.ts\nseatHeaders() / withSeat()" as SeatLib
+	component "Join Route\nPOST /api/activities/{id}/join" as JoinAPI
+	component "Student & Teacher Routes\n(submissions, events, results,\nrounds, import, writeback …)" as AppAPI
+	component "Teacher Pages (SSR)" as TeacherPages
+	component "OAuth Callback" as OAuth
+	component "Session Module\nserver/auth/session.ts\n(seat resolver + signed cookies)" as Session
+}
+
+Teacher --> TeacherPages
+Teacher --> OAuth : Google sign-in
+TabA --> JoinUI
+TabB --> JoinUI
+JoinUI --> JoinAPI : POST join
+JoinAPI --> Session : createSeatId, pruneSeatCookies,\nsetSeatSessionCookie
+JoinAPI ..> Jar : Set-Cookie qa_seat_<seat>
+OAuth --> Session : setTeacherSessionCookie
+OAuth ..> Jar : Set-Cookie qa_teacher
+StudentPage --> Session : getStudentServerSession(seat)
+StudentPage --> RoundUI : seat prop
+RoundUI --> SeatLib
+RoundUI --> AppAPI : header x-quickanswer-seat /\nquery ?seat= (EventSource)
+TeacherPages --> Session : getTeacherServerSession()
+AppAPI --> Session : getRequestSession(request)
+Jar ..> AppAPI : Cookie header (every cookie)
+
+note bottom of Session
+	seat present  → only qa_seat_<seat>, role student,
+	                claims.seatId must equal seat
+	seat absent   → only qa_teacher, role teacher
+	malformed seat → no session (never falls back)
+end note
+@enduml
