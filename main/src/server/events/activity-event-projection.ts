@@ -15,6 +15,7 @@ export function projectActivityEvent<T extends Record<string, unknown>>(
       roundId: event.data.roundId,
       groupId: session.groupId,
       answer: event.data.answer,
+      answers: event.data.answers,
       acceptedOrder: event.data.acceptedOrder,
       acceptedAt: event.data.acceptedAt,
     },

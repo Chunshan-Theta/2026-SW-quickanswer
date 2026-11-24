@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
-import type { WorksheetGrid } from "@/features/sheets/domain/worksheet-parser";
+import type { WorksheetParseResult } from "@/features/sheets/domain/worksheet-parser";
 
-export function worksheetFingerprint(grid: WorksheetGrid): string {
-  return createHash("sha256").update(JSON.stringify(grid)).digest("hex");
+/**
+ * Fingerprint of the question structure only (numbers, rows, answer-cell positions).
+ * Answer-cell contents are excluded so a completed writeback never invalidates later ones.
+ */
+export function structureFingerprint(parsed: Pick<WorksheetParseResult, "structure">): string {
+  return createHash("sha256").update(JSON.stringify(parsed.structure)).digest("hex");
 }

@@ -14,8 +14,8 @@ export async function POST(request: Request, context: { params: Promise<{ activi
     requireActivity(student, activityId);
     const body = await request.json().catch(() => null);
     const parsed = roundSubmissionSchema.safeParse(body);
-    if (!parsed.success) throw new AppError(422, errorCodes.invalidInput, "請輸入有效答案。", parsed.error.flatten());
-    const result = await acceptRoundAnswer(activityId, roundId, student.groupId!, parsed.data.answer);
+    if (!parsed.success) throw new AppError(422, errorCodes.invalidInput, "請填寫所有子題的答案。", parsed.error.flatten());
+    const result = await acceptRoundAnswer(activityId, roundId, student.groupId!, parsed.data.answers);
     return jsonResponse({ accepted: true, ...result }, id, 201);
   });
 }

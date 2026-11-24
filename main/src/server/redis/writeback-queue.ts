@@ -15,10 +15,12 @@ export type WritebackJob = {
   teacherId: string;
   questionNumber: string;
   winnerGroupId: string;
+  /** Display text of the winning answer. */
   answer: string;
+  /** JSON-encoded string[]: one answer per blank (absent on jobs queued before 002). */
+  answers?: string;
   status: WritebackStatus;
   attempt: string;
-  expectedPostFingerprint?: string;
   errorCode?: string;
 };
 
@@ -88,10 +90,6 @@ export async function getWritebackStatus(activityId: string, roundId: string, te
 export async function readWritebackJob(redis: RedisClientType, jobId: string): Promise<WritebackJob | null> {
   const job = await redis.hGetAll(redisKeys.writebackJob(jobId));
   return job.jobId ? job as WritebackJob : null;
-}
-
-export async function saveExpectedPostFingerprint(redis: RedisClientType, jobId: string, fingerprint: string): Promise<void> {
-  await redis.hSet(redisKeys.writebackJob(jobId), "expectedPostFingerprint", fingerprint);
 }
 
 export async function updateWritebackStatus(

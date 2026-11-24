@@ -1,0 +1,55 @@
+@startuml
+!pragma layout smetana
+title Component Diagram - 002 Guided Notes Template Import & Per-Question Writeback
+left to right direction
+
+actor Teacher
+actor Student
+
+package "Next.js App (Node.js runtime)" {
+	component "Teacher Import UI\n(Picker + Tab Selector)" as ImportUI
+	component "Teacher Round Control\n(Completed Rounds + Writeback)" as RoundUI
+	component "Student Answer Form\n(single / group blanks)" as AnswerUI
+	component "Sheet Tabs Route\nGET /api/sheets/{id}/tabs" as TabsAPI
+	component "Import / Round / Writeback Routes" as AppAPI
+	component "Worksheet Parser" as Parser
+	component "Table Layout Detector\n(header: 題號/題目/作答)" as TableLayout
+	component "Marker Layout Detector\n({{answer:N}})" as MarkerLayout
+	component "Merge Resolver" as Merges
+	component "Structure Snapshot\n(fingerprint w/o answer values)" as Structure
+	component "Google Sheets Adapter" as SheetsAccess
+	component "Round Store (Lua)\nanswers[] per submission" as RoundStore
+	component "Writeback Worker\n(multi-blank, label-preserving)" as Worker
+}
+
+database "Private Redis" as Redis
+cloud "Guided Notes Spreadsheet" as Sheet
+
+Teacher --> ImportUI : pick file, choose tab
+Teacher --> RoundUI : open / close / write back
+Student --> AnswerUI : submit all blanks at once
+ImportUI --> TabsAPI : list tabs by name
+ImportUI --> AppAPI : import (spreadsheetId, sheetId)
+RoundUI --> AppAPI : open / close / writeback(roundId)
+AnswerUI --> AppAPI : POST answers[]
+TabsAPI --> SheetsAccess : sheet properties only
+AppAPI --> SheetsAccess : grid data + merges
+AppAPI --> Parser : parse grid
+Parser --> TableLayout : header row found
+Parser --> MarkerLayout : fallback
+TableLayout --> Merges : resolve merged number / answer cells
+AppAPI --> Structure : store at import
+AppAPI --> RoundStore : open / submit / close
+RoundStore --> Redis : atomic state + events
+Worker --> Redis : read job (answers[])
+Worker --> SheetsAccess : rescan + write blanks
+Worker --> Structure : compare with import snapshot
+SheetsAccess <--> Sheet : read / RAW write
+
+note bottom of Structure
+	Snapshot = question numbers, row spans,
+	answer-cell locations and blank labels.
+	Answer-cell contents are excluded, so
+	earlier writebacks never block later ones.
+end note
+@enduml

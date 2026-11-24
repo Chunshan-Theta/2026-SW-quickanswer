@@ -24,10 +24,15 @@ export const joinActivitySchema = z.object({
 });
 export const joinCodeSchema = z.string().trim().regex(/^[A-HJ-NP-Z2-9]{6}$/);
 
-export const roundSubmissionSchema = z.object({
-  answer: z.string().trim().min(1).max(4000),
-  requestId: z.string().uuid(),
-});
+const submittedAnswer = z.string().trim().min(1).max(4000);
+
+/** Accepts `answers` (one per blank) or the legacy single `answer`; always yields `answers`. */
+export const roundSubmissionSchema = z
+  .union([
+    z.object({ answers: z.array(submittedAnswer).min(1).max(20), requestId: z.string().uuid() }),
+    z.object({ answer: submittedAnswer, requestId: z.string().uuid() }),
+  ])
+  .transform((value) => ({ answers: "answers" in value ? value.answers : [value.answer], requestId: value.requestId }));
 
 export const roundOpenSchema = z.object({
   questionNumber: z.string().trim().regex(/^\d+$/).max(32),

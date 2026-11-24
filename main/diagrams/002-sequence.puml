@@ -1,0 +1,73 @@
+@startuml
+title Sequence Diagram - 002 Template Import, Group Question Round & Multi-Blank Writeback
+
+actor Teacher
+participant "Teacher Import UI" as ImportUI
+participant "Teacher Round Control" as RoundUI
+participant "Route Handlers" as API
+participant "Worksheet Parser" as Parser
+participant "Google Sheets Adapter" as SheetsAccess
+participant "Guided Notes Sheet" as Sheet
+participant "Round Store (Lua)" as Redis
+participant "Student Answer Form" as Student
+participant "Writeback Worker" as Worker
+
+== Import ==
+Teacher -> ImportUI : Pick spreadsheet in Google Picker
+ImportUI -> API : GET /api/sheets/{id}/tabs
+API -> SheetsAccess : spreadsheets.get(properties only)
+SheetsAccess --> API : tabs (sheetId, title)
+API --> ImportUI : tab list
+alt exactly one tab
+  ImportUI -> ImportUI : auto-select tab
+else several tabs
+  Teacher -> ImportUI : choose tab by name
+end
+ImportUI -> API : POST /api/activities/import
+API -> SheetsAccess : readWorksheet(grid + merges)
+SheetsAccess -> Sheet : spreadsheets.get(includeGridData)
+Sheet --> SheetsAccess : cells + merges
+API -> Parser : parseWorksheetGrid
+Parser -> Parser : find header row (題號 / 題目 / 作答)
+Parser -> Parser : group rows by merged / repeated number\nand unnumbered sub-rows
+Parser --> API : questions (single | group, blanks) + issues
+alt blocking issues
+  API --> ImportUI : 422 with per-question issues (number, row)
+else valid
+  API -> Redis : save activity + structure snapshot
+  API --> ImportUI : 201 preview (blanks per question)
+end
+
+== Group question round ==
+Teacher -> RoundUI : Open question 1 (group, 2 blanks)
+RoundUI -> API : POST rounds/open
+API -> Redis : Lua open-round (store blanks)
+Redis --> Student : phase.changed {blanks: [(1), (2)]}
+Student -> API : POST submissions {answers: [a1, a2]}
+API -> Redis : Lua submit-answer\n(reject if count != blanks or any blank empty)
+Redis --> Student : own receipt (answers)
+Teacher -> RoundUI : Close question
+RoundUI -> API : POST rounds/{roundId}/close
+API -> Redis : Lua close-round
+Redis --> RoundUI : results.finalized (answers per group)
+
+== Writeback (any completed question) ==
+Teacher -> RoundUI : Write back question 1 (from completed list)
+RoundUI -> API : POST rounds/{roundId}/writeback
+API -> Redis : enqueue job (answers[])
+Worker -> Redis : XREADGROUP job
+Worker -> SheetsAccess : readWorksheet
+Worker -> Parser : parse + structure snapshot
+alt snapshot differs from import
+  Worker -> Redis : status failed (structure changed)
+else snapshot equal
+  alt target cells already hold label + answers
+    Worker -> Redis : status succeeded (idempotent replay)
+  else
+    Worker -> SheetsAccess : RAW write label + answers[i] per blank
+    SheetsAccess -> Sheet : values.batchUpdate
+    Worker -> SheetsAccess : re-read and verify target cells
+    Worker -> Redis : status succeeded
+  end
+end
+@enduml

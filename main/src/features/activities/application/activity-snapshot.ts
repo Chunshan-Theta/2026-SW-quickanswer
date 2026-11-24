@@ -1,6 +1,6 @@
 import "server-only";
 import type { SessionClaims } from "@/features/activities/domain/types";
-import type { ActivityRoundSnapshot, ActivitySnapshot, ActivitySubmissionSnapshot } from "@/features/activities/domain/snapshot";
+import { parseRoundBlanks, type ActivityRoundSnapshot, type ActivitySnapshot, type ActivitySubmissionSnapshot } from "@/features/activities/domain/snapshot";
 import { AppError } from "@/server/http/errors";
 import { errorCodes } from "@/lib/errors/error-codes";
 import { getRedisClient } from "@/server/redis/client";
@@ -40,6 +40,8 @@ export async function getActivitySnapshot(activityId: string, session: SessionCl
     roundId,
     questionNumber: round.questionNumber,
     prompt: round.prompt,
+    kind: round.kind === "group" ? "group" : "single",
+    blanks: parseRoundBlanks(round.blanks, round.prompt),
     phase: round.phase,
     winnerGroupId: round.winnerGroupId || null,
     submissions,

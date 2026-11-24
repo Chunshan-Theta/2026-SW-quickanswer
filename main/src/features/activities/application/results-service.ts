@@ -1,5 +1,6 @@
 import "server-only";
 import type { SessionClaims } from "@/features/activities/domain/types";
+import { parseRoundBlanks } from "@/features/activities/domain/snapshot";
 import { errorCodes } from "@/lib/errors/error-codes";
 import { AppError } from "@/server/http/errors";
 import { getRedisClient } from "@/server/redis/client";
@@ -14,6 +15,7 @@ type ActivityRecord = {
 type SubmissionRecord = {
   groupId: string;
   answer: string;
+  answers?: string[];
   acceptedOrder: number;
   acceptedAt: string;
 };
@@ -53,6 +55,8 @@ export async function getRoundResults(activityId: string, roundId: string, sessi
     roundId,
     phase: round.phase,
     questionNumber: round.questionNumber,
+    kind: round.kind === "group" ? "group" : "single",
+    blanks: parseRoundBlanks(round.blanks, round.prompt ?? ""),
     winnerGroupId: round.phase === "closed" ? round.winnerGroupId || null : null,
     submissions: visibleSubmissions,
   };

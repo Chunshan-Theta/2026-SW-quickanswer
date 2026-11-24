@@ -3,7 +3,13 @@ import { google } from "googleapis";
 import { getGoogleTokens, saveGoogleTokens } from "@/server/auth/google-token-store";
 import { AppError } from "@/server/http/errors";
 import { errorCodes } from "@/lib/errors/error-codes";
-import type { CellLocation, WorksheetGrid, WorksheetRow } from "@/features/sheets/domain/worksheet-parser";
+import type { CellLocation, MergeRange, WorksheetGrid, WorksheetRow } from "@/features/sheets/domain/worksheet-parser";
+
+export interface SheetTab {
+  sheetId: number;
+  title: string;
+  index: number;
+}
 
 function googleError(error: unknown): AppError {
   const status = typeof error === "object" && error !== null && "code" in error ? Number(error.code) : 0;
@@ -32,8 +38,8 @@ async function sheetsForTeacher(teacherId: string) {
 export async function readWorksheet(teacherId: string, spreadsheetId: string, sheetId: number): Promise<WorksheetGrid> {
   try {
     const response = await (await sheetsForTeacher(teacherId)).spreadsheets.get({ spreadsheetId, includeGridData: true });
-    const sheet = response.data.sheets?.find((item) => item.properties?.sheetId === sheetId);
-    if (!sheet) throw new AppError(404, errorCodes.notFound, "找不到指定的工作表。");
+    const sheet = response.data.sheets?.find((item) => (item.properties?.sheetId ?? 0) === sheetId);
+    if (!sheet) throw new AppError(404, errorCodes.notFound, "找不到指定的工作表分頁，請重新選擇。");
     const rows: WorksheetRow[] = [];
     for (const block of sheet.data ?? []) {
       const startRow = block.startRow ?? 0;
@@ -54,9 +60,37 @@ export async function readWorksheet(teacherId: string, spreadsheetId: string, sh
         }
       }
     }
-    return { sheetId, title: sheet.properties?.title ?? "", rows: Array.from(rows, (row) => row ?? { values: [] }) };
+    // The API omits zero-valued GridRange fields, so default every index to 0.
+    const merges: MergeRange[] = (sheet.merges ?? []).map((merge) => ({
+      startRow: merge.startRowIndex ?? 0,
+      endRow: merge.endRowIndex ?? 0,
+      startColumn: merge.startColumnIndex ?? 0,
+      endColumn: merge.endColumnIndex ?? 0,
+    }));
+    return { sheetId, title: sheet.properties?.title ?? "", rows: Array.from(rows, (row) => row ?? { values: [] }), merges };
   } catch (error) {
     if (error instanceof AppError) throw error;
+    throw googleError(error);
+  }
+}
+
+export async function listSheetTabs(teacherId: string, spreadsheetId: string): Promise<SheetTab[]> {
+  try {
+    const response = await (await sheetsForTeacher(teacherId)).spreadsheets.get({
+      spreadsheetId,
+      fields: "sheets.properties(sheetId,title,index)",
+    });
+    return (response.data.sheets ?? [])
+      .map((sheet) => ({
+        sheetId: sheet.properties?.sheetId ?? 0,
+        title: sheet.properties?.title ?? "",
+        index: sheet.properties?.index ?? 0,
+      }))
+      .sort((left, right) => left.index - right.index);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    const status = typeof error === "object" && error !== null && "code" in error ? Number(error.code) : 0;
+    if (status === 404) throw new AppError(404, errorCodes.notFound, "找不到試算表，請重新選取。");
     throw googleError(error);
   }
 }

@@ -15,14 +15,25 @@ if not question then return cjson.encode({ error = "QUESTION_NOT_FOUND" }) end
 for _, completedNumber in ipairs(activity.completedQuestionNumbers or {}) do
   if completedNumber == ARGV[3] then return cjson.encode({ error = "QUESTION_ALREADY_COMPLETED" }) end
 end
-if question.mappingStatus ~= "confirmed" or not question.selectedToken then return cjson.encode({ error = "MAPPING_NOT_CONFIRMED" }) end
+if question.mappingStatus ~= "confirmed" then return cjson.encode({ error = "MAPPING_NOT_CONFIRMED" }) end
+-- Public sub-question data: one entry per answer blank (a single question has exactly one).
+local blanks = {}
+for _, blank in ipairs(question.blanks or {}) do
+  local label = blank.label
+  if label == nil then label = cjson.null end
+  table.insert(blanks, { label = label, prompt = blank.prompt or "" })
+end
+if #blanks == 0 then table.insert(blanks, { label = cjson.null, prompt = question.prompt }) end
+local kind = question.kind or "single"
 activity.phase = "active"
 activity.currentRoundId = ARGV[2]
+if type(activity.roundIdsByQuestion) ~= "table" then activity.roundIdsByQuestion = {} end
+activity.roundIdsByQuestion[question.questionNumber] = ARGV[2]
 activity.stateVersion = (activity.stateVersion or 0) + 1
 redis.call("SET", KEYS[1], cjson.encode(activity), "KEEPTTL")
-redis.call("HSET", KEYS[2], "activityId", activity.activityId, "questionNumber", question.questionNumber, "prompt", question.prompt, "phase", "open", "openedAt", ARGV[4], "nextOrder", "0", "stateVersion", tostring(activity.stateVersion))
+redis.call("HSET", KEYS[2], "activityId", activity.activityId, "questionNumber", question.questionNumber, "prompt", question.prompt, "kind", kind, "blankCount", tostring(#blanks), "blanks", cjson.encode(blanks), "phase", "open", "openedAt", ARGV[4], "nextOrder", "0", "stateVersion", tostring(activity.stateVersion))
 redis.call("EXPIRE", KEYS[2], tonumber(ARGV[5]))
-local payload = cjson.encode({ type = "phase.changed", activityId = activity.activityId, stateVersion = activity.stateVersion, occurredAt = ARGV[4], data = { roundId = ARGV[2], phase = "open", questionNumber = question.questionNumber, prompt = question.prompt } })
+local payload = cjson.encode({ type = "phase.changed", activityId = activity.activityId, stateVersion = activity.stateVersion, occurredAt = ARGV[4], data = { roundId = ARGV[2], phase = "open", questionNumber = question.questionNumber, prompt = question.prompt, kind = kind, blanks = blanks } })
 redis.call("XADD", KEYS[3], "MAXLEN", "~", "1000", "*", "stateVersion", tostring(activity.stateVersion), "payload", payload)
 redis.call("EXPIRE", KEYS[3], tonumber(ARGV[5]))
-return cjson.encode({ roundId = ARGV[2], questionNumber = question.questionNumber, prompt = question.prompt, phase = "open", stateVersion = activity.stateVersion })
+return cjson.encode({ roundId = ARGV[2], questionNumber = question.questionNumber, prompt = question.prompt, kind = kind, blanks = blanks, phase = "open", stateVersion = activity.stateVersion })

@@ -9,8 +9,8 @@ export function openActivityRound(activityId: string, teacherId: string, questio
   return openRoundRecord(activityId, teacherId, questionNumber);
 }
 
-export function acceptRoundAnswer(activityId: string, roundId: string, groupId: string, answer: string) {
-  return submitAnswerRecord(activityId, roundId, groupId, answer);
+export function acceptRoundAnswer(activityId: string, roundId: string, groupId: string, answers: string[]) {
+  return submitAnswerRecord(activityId, roundId, groupId, answers);
 }
 
 export function finishActivityRound(activityId: string, roundId: string, teacherId: string) {

@@ -3,14 +3,15 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Check, RadioTower } from "lucide-react";
 import { StudentAnswerForm } from "@/components/student/answer-form";
-import type { ActivitySnapshot, ActivitySubmissionSnapshot } from "@/features/activities/domain/snapshot";
+import { SubmissionAnswer } from "@/components/shared/submission-answer";
+import type { ActivitySnapshot, ActivitySubmissionSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
 
 type Submission = ActivitySubmissionSnapshot;
 export type Snapshot = ActivitySnapshot;
 
 export function StudentActivityRound({ activityId, groupId, initialSnapshot }: { activityId: string; groupId: string; initialSnapshot: Snapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
-  const [answer, setAnswer] = useState("");
+  const [answers, setAnswers] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
@@ -24,9 +25,9 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
       setSnapshot(JSON.parse(event.data) as Snapshot);
     });
     stream.addEventListener("phase.changed", (message) => {
-      const event = JSON.parse((message as MessageEvent<string>).data) as { stateVersion: number; data: { roundId: string; questionNumber: string; prompt: string; phase: "open" | "closed" } };
-      setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, phase: "active", currentRound: { roundId: event.data.roundId, questionNumber: event.data.questionNumber, prompt: event.data.prompt, phase: event.data.phase, winnerGroupId: null, submissions: [] } }));
-      setAnswer("");
+      const event = JSON.parse((message as MessageEvent<string>).data) as { stateVersion: number; data: { roundId: string; questionNumber: string; prompt: string; kind?: "single" | "group"; blanks?: RoundBlankSnapshot[]; phase: "open" | "closed" } };
+      setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, phase: "active", currentRound: { roundId: event.data.roundId, questionNumber: event.data.questionNumber, prompt: event.data.prompt, kind: event.data.kind, blanks: event.data.blanks, phase: event.data.phase, winnerGroupId: null, submissions: [] } }));
+      setAnswers([]);
     });
     stream.addEventListener("submission.receipt", (message) => {
       const event = JSON.parse((message as MessageEvent<string>).data) as { stateVersion: number; data: Submission & { roundId: string } };
@@ -48,6 +49,9 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
     return () => stream.close();
   }, [activityId]);
 
+  const currentRound = snapshot.currentRound;
+  const blanks: RoundBlankSnapshot[] = currentRound?.blanks?.length ? currentRound.blanks : [{ label: null, prompt: currentRound?.prompt ?? "" }];
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const round = snapshot.currentRound;
@@ -58,11 +62,11 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
       const response = await fetch(`/api/activities/${activityId}/rounds/${round.roundId}/submissions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ answer, requestId: crypto.randomUUID() }),
+        body: JSON.stringify({ answers: blanks.map((_, index) => (answers[index] ?? "").trim()), requestId: crypto.randomUUID() }),
       });
       const body = await response.json() as { error?: { message?: string } };
       if (!response.ok) throw new Error(body.error?.message ?? "無法送出答案。");
-      setAnswer("");
+      setAnswers([]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "連線失敗，請重試。");
     } finally {
@@ -82,18 +86,18 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
       {round ? (
         <>
           <div className="student-question">
-            <p className="eyebrow">QUESTION {round.questionNumber.padStart(2, "0")}</p>
+            <p className="eyebrow">QUESTION {round.questionNumber.padStart(2, "0")}{round.kind === "group" ? ` · 題組 ${blanks.length} 小題` : ""}</p>
             <h2>{round.prompt}</h2>
           </div>
           {round.phase === "open" && !ownSubmission && (
-            <StudentAnswerForm answer={answer} busy={busy} error={error} onAnswerChange={setAnswer} onSubmit={submit} />
+            <StudentAnswerForm blanks={blanks} answers={answers} busy={busy} error={error} onAnswerChange={(index, value) => setAnswers((current) => { const next = [...current]; next[index] = value; return next; })} onSubmit={submit} />
           )}
           {round.phase === "open" && ownSubmission && <p className="receipt-message" role="status"><Check size={17} />答案已送達，等待老師公布結果。</p>}
           {round.phase === "closed" && (
             <section className="final-result" aria-labelledby="result-heading">
               <div className="section-heading"><h3 id="result-heading">最終結果</h3><span>{round.winnerGroupId ? `最快：${round.winnerGroupId}` : "本題無人作答"}</span></div>
               <ol className="result-list">
-                {round.submissions.map((submission) => <li key={submission.groupId}><span>{submission.acceptedOrder.toString().padStart(2, "0")}</span><strong>{submission.groupId}</strong><p>{submission.answer}</p>{submission.groupId === round.winnerGroupId && <Check size={16} aria-label="搶答成功" />}</li>)}
+                {round.submissions.map((submission) => <li key={submission.groupId}><span>{submission.acceptedOrder.toString().padStart(2, "0")}</span><strong>{submission.groupId}</strong><SubmissionAnswer submission={submission} blanks={round.blanks} />{submission.groupId === round.winnerGroupId && <Check size={16} aria-label="搶答成功" />}</li>)}
               </ol>
             </section>
           )}
