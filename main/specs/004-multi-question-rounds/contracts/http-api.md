@@ -54,6 +54,7 @@ Errors: `403`, `404`, `409 目前沒有開放中的題目。`
 
 - `POST /rounds/{roundId}/close` — same request/response (single closed round object, now also with `closedAt`). Closing one round never affects other open rounds.
 - `POST /rounds/{roundId}/submissions` — same request/response; accepted for any currently open round of the activity; `409 此搶答回合已結束。` once that round is closed.
+  - Fix (T031): the `201` body is now an explicit allow-list `{ accepted, groupId, answer, answers, acceptedOrder, acceptedAt, stateVersion }`. It no longer includes `winnerGroupId`, which used to tell a student group who was winning while the question was still open (FR-009).
 - `POST /rounds/{roundId}/writeback` — same request/response; when the previous job for the round has `status: "failed"`, the job is re-queued (`existing: false`, `status: "queued"`) instead of returning the failed job.
 
 ## CHANGED SSE `activity.snapshot` and teacher page data (breaking)

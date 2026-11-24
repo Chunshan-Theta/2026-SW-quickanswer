@@ -107,6 +107,7 @@
 - [X] T028 [P] Remove the obsolete `currentRoundId` seed field from `tests/load/activity-sse.test.ts`
 - [X] T029 Run `pnpm typecheck`, `pnpm lint`, `pnpm test:unit`, `pnpm test:contract`, `pnpm test:security`, `pnpm test:integration`, `pnpm exec vitest run tests/architecture`
 - [X] T030 Verify the implementation against `diagrams/004-*.puml`, `class.puml`, `sequence.puml` and record the result in `quickstart.md`
+- [X] T031 [US2] Integration review fix for FR-009: the student submission response leaked `winnerGroupId` while the round was open. Regression test `does not reveal the current winner…` in `tests/security/server-boundary.test.ts` (failed before the fix); the fix is an explicit receipt allow-list in `src/app/api/activities/[activityId]/rounds/[roundId]/submissions/route.ts`
 
 ---
 
@@ -137,7 +138,7 @@ MVP = Phases 1–3 (multi-open/close via API). Then US2 makes it usable by stude
 | FR-006 close one / close all atomically | T007, T011, T012, T013 |
 | FR-007 closed question rejects, others accept | T014, T017 |
 | FR-008 student stacked open questions | T019, T020, T027 |
-| FR-009 per-round privacy | T015, T018 |
+| FR-009 per-round privacy | T015, T018, T031 |
 | FR-010 card list, wrapping, 360px | T024, T025, quickstart D-1 |
 | FR-011 card status | T002, T005, T024 |
 | FR-012 live ranking + 結束本題 | T024, T027 |
