@@ -27,7 +27,6 @@ async function seedReadyActivity(id: string, code: string) {
     joinCode: code,
     phase: "ready",
     stateVersion: 0,
-    currentRoundId: null,
     layout: "table",
     structureFingerprint: "test-structure",
     groupNames: ["Blue", "Red"],
@@ -59,9 +58,9 @@ async function seedReadyActivity(id: string, code: string) {
 
 async function clearActivity(id: string, code: string) {
   const rawActivity = await redis.get(`activity:${id}:meta`);
-  const roundId = rawActivity ? (JSON.parse(rawActivity) as { currentRoundId?: string }).currentRoundId : undefined;
+  const roundIds = rawActivity ? Object.values((JSON.parse(rawActivity) as { roundIdsByQuestion?: Record<string, string> }).roundIdsByQuestion ?? {}) : [];
   const keys = [`activity:${id}:meta`, `activity:${id}:events`, `activity:join:${code}`];
-  if (roundId) keys.push(`round:${roundId}:state`, `round:${roundId}:submissions`, `round:${roundId}:order`, `round:${roundId}:winner`);
+  for (const roundId of roundIds) keys.push(`round:${roundId}:state`, `round:${roundId}:submissions`, `round:${roundId}:order`, `round:${roundId}:winner`);
   await redis.del(keys);
 }
 
@@ -123,7 +122,7 @@ test("teacher queues the winning answer writeback and sees its status", async ({
     joinCode: "ABC234",
     phase: "completed",
     stateVersion: 4,
-    currentRoundId: roundId,
+    roundIdsByQuestion: { 1: roundId },
     groupNames: ["Blue", "Red"],
     completedQuestionNumbers: ["1"],
     questions: [{ questionNumber: "1", prompt: "Name the process.", mappingStatus: "confirmed" }],
@@ -175,7 +174,10 @@ test("teacher and students open, answer, close, and see role-filtered results", 
     await addTeacherCookie(teacherPage);
     await teacherPage.goto(`/teacher/activities/${id}`);
     await expect(teacherPage.getByText(code)).toBeVisible();
-    await teacherPage.getByRole("button", { name: "開啟搶答" }).click();
+    // No dropdown: questions are cards with checkboxes.
+    await expect(teacherPage.locator("select")).toHaveCount(0);
+    await teacherPage.getByLabel("選取第 1 題").check();
+    await teacherPage.getByRole("button", { name: "開放所選題目" }).click();
     await expect(teacherPage.getByRole("button", { name: "結束本題" })).toBeVisible();
 
     blue = await joinGroup(browser, code, "Blue");
@@ -296,8 +298,8 @@ test("students must answer every blank of a question group in one submission", a
   try {
     await addTeacherCookie(teacherPage);
     await teacherPage.goto(`/teacher/activities/${id}`);
-    await teacherPage.getByLabel("選擇題目").selectOption("2");
-    await teacherPage.getByRole("button", { name: "開啟搶答" }).click();
+    await teacherPage.getByLabel("選取第 2 題").check();
+    await teacherPage.getByRole("button", { name: "開放所選題目" }).click();
     await expect(teacherPage.getByRole("button", { name: "結束本題" })).toBeVisible();
 
     blue = await joinGroup(browser, code, "Blue");
@@ -314,6 +316,57 @@ test("students must answer every blank of a question group in one submission", a
     await expect(blue.page.getByText("中央處理器")).toBeVisible();
   } finally {
     await Promise.all([blue?.context.close(), teacherContext.close()]);
+    await clearActivity(id, code);
+  }
+});
+
+test("teacher opens several questions at once, groups answer different questions, and closes them all", async ({ browser }) => {
+  const id = "e2e-multi-activity";
+  const code = "MLT234";
+  await clearActivity(id, code);
+  await seedReadyActivity(id, code);
+  const teacherContext = await browser.newContext();
+  const teacherPage = await teacherContext.newPage();
+  let blue: Awaited<ReturnType<typeof joinGroup>> | undefined;
+  let red: Awaited<ReturnType<typeof joinGroup>> | undefined;
+  try {
+    await addTeacherCookie(teacherPage);
+    await teacherPage.goto(`/teacher/activities/${id}`);
+    await teacherPage.getByLabel("選取第 1 題").check();
+    await teacherPage.getByLabel("選取第 2 題").check();
+    await expect(teacherPage.getByText("已選 2 題")).toBeVisible();
+    await teacherPage.getByRole("button", { name: "開放所選題目" }).click();
+    await expect(teacherPage.getByRole("button", { name: "結束本題" })).toHaveCount(2);
+    await expect(teacherPage.getByText("搶答中 2 題")).toBeVisible();
+
+    blue = await joinGroup(browser, code, "Blue");
+    red = await joinGroup(browser, code, "Red");
+    const blueSingle = blue.page.locator(".student-round-card", { hasText: "Name the process." });
+    const redGroup = red.page.locator(".student-round-card", { hasText: "CPU？" });
+    await expect(blue.page.locator(".student-round-card")).toHaveCount(2);
+
+    await blueSingle.getByLabel("小組答案").fill("Photosynthesis");
+    await blueSingle.getByRole("button", { name: "送出答案" }).click();
+    await expect(blueSingle.getByText("答案已送達")).toBeVisible();
+    // Blue's other open question is still answerable.
+    await expect(blue.page.getByLabel("（1） CPU？")).toBeVisible();
+
+    await redGroup.getByLabel("（1） CPU？").fill("中央處理器");
+    await redGroup.getByLabel("（2） OS？").fill("作業系統");
+    await redGroup.getByRole("button", { name: "送出答案" }).click();
+    await expect(redGroup.getByText("答案已送達")).toBeVisible();
+    await expect(red.page.getByText("Photosynthesis")).toHaveCount(0);
+
+    await expect(teacherPage.getByText("Photosynthesis")).toBeVisible();
+    await expect(teacherPage.getByText("作業系統")).toBeVisible();
+    await teacherPage.getByRole("button", { name: "結束全部開放中" }).click();
+    await expect(teacherPage.getByText("搶答成功：Blue")).toBeVisible();
+    await expect(teacherPage.getByText("搶答成功：Red")).toBeVisible();
+    await expect(teacherPage.getByText("活動已完成")).toBeVisible();
+    await expect(red.page.getByText("已公布結果")).toBeVisible();
+    await expect(red.page.getByText("Photosynthesis")).toBeVisible();
+  } finally {
+    await Promise.all([blue?.context.close(), red?.context.close(), teacherContext.close()]);
     await clearActivity(id, code);
   }
 });

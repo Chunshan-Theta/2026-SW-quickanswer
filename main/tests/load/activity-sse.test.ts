@@ -29,7 +29,6 @@ describe("500-client SSE phase fanout", () => {
       teacherId,
       phase: "ready",
       stateVersion: 0,
-      currentRoundId: null,
       groupNames: ["Blue", "Red"],
     }), { EX: 60 });
     const cookie = `classroom_session=${signSession({ sub: teacherId, role: "teacher" })}`;
@@ -51,7 +50,6 @@ describe("500-client SSE phase fanout", () => {
         teacherId,
         phase: "active",
         stateVersion: 1,
-        currentRoundId: null,
         groupNames: ["Blue", "Red"],
       }), { EX: 60 });
       const event = {
