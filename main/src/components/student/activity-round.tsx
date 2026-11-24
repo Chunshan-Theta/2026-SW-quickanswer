@@ -3,106 +3,154 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Check, RadioTower } from "lucide-react";
 import { StudentAnswerForm } from "@/components/student/answer-form";
+import { studentEventsUrl, submitStudentAnswers } from "@/components/student/student-api";
 import { SubmissionAnswer } from "@/components/shared/submission-answer";
-import type { ActivitySnapshot, ActivitySubmissionSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
+import { applyRoundClosed, applyRoundOpened, applySubmission, type RoundClosedData, type RoundOpenedData } from "@/features/activities/domain/round-state";
+import type { ActivityRoundSnapshot, ActivitySnapshot, ActivitySubmissionSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
 
-type Submission = ActivitySubmissionSnapshot;
 export type Snapshot = ActivitySnapshot;
+type LiveEvent<T> = { stateVersion: number; occurredAt?: string; data: T };
+
+function readEvent<T>(message: Event): LiveEvent<T> {
+  return JSON.parse((message as MessageEvent<string>).data) as LiveEvent<T>;
+}
+
+function roundBlanks(round: ActivityRoundSnapshot): RoundBlankSnapshot[] {
+  return round.blanks?.length ? round.blanks : [{ label: null, prompt: round.prompt }];
+}
+
+function questionLabel(round: ActivityRoundSnapshot): string {
+  return `QUESTION ${round.questionNumber.padStart(2, "0")}${round.kind === "group" ? ` · 題組 ${roundBlanks(round).length} 小題` : ""}`;
+}
 
 export function StudentActivityRound({ activityId, groupId, initialSnapshot }: { activityId: string; groupId: string; initialSnapshot: Snapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
-  const [answers, setAnswers] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string[]>>({});
+  const [busyRounds, setBusyRounds] = useState<Record<string, boolean>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const stream = new EventSource(`/api/activities/${activityId}/events`);
+    const stream = new EventSource(studentEventsUrl(activityId));
     stream.onopen = () => setConnected(true);
     stream.onerror = () => setConnected(false);
     stream.addEventListener("activity.snapshot", (message) => {
-      const event = message as MessageEvent<string>;
-      setSnapshot(JSON.parse(event.data) as Snapshot);
+      setSnapshot(JSON.parse((message as MessageEvent<string>).data) as Snapshot);
     });
     stream.addEventListener("phase.changed", (message) => {
-      const event = JSON.parse((message as MessageEvent<string>).data) as { stateVersion: number; data: { roundId: string; questionNumber: string; prompt: string; kind?: "single" | "group"; blanks?: RoundBlankSnapshot[]; phase: "open" | "closed" } };
-      setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, phase: "active", currentRound: { roundId: event.data.roundId, questionNumber: event.data.questionNumber, prompt: event.data.prompt, kind: event.data.kind, blanks: event.data.blanks, phase: event.data.phase, winnerGroupId: null, submissions: [] } }));
-      setAnswers([]);
+      const event = readEvent<RoundOpenedData & { phase: string }>(message);
+      if (event.data.phase !== "open") return;
+      setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, phase: "active", rounds: applyRoundOpened(current.rounds, { ...event.data, openedAt: event.occurredAt }) }));
     });
     stream.addEventListener("submission.receipt", (message) => {
-      const event = JSON.parse((message as MessageEvent<string>).data) as { stateVersion: number; data: Submission & { roundId: string } };
-      setSnapshot((current) => current.currentRound?.roundId !== event.data.roundId ? current : ({
-        ...current,
-        stateVersion: event.stateVersion,
-        currentRound: { ...current.currentRound!, submissions: [event.data] },
-      }));
+      const event = readEvent<ActivitySubmissionSnapshot & { roundId: string }>(message);
+      setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, rounds: applySubmission(current.rounds, event.data.roundId, event.data) }));
     });
     stream.addEventListener("results.finalized", (message) => {
-      const event = JSON.parse((message as MessageEvent<string>).data) as { stateVersion: number; data: { roundId: string; phase: "closed"; winnerGroupId: string | null; submissions: Submission[] } };
-      setSnapshot((current) => current.currentRound?.roundId !== event.data.roundId ? current : ({
-        ...current,
-        stateVersion: event.stateVersion,
-        phase: "active",
-        currentRound: { ...current.currentRound!, phase: "closed", winnerGroupId: event.data.winnerGroupId, submissions: event.data.submissions },
-      }));
+      const event = readEvent<RoundClosedData>(message);
+      setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, rounds: applyRoundClosed(current.rounds, { ...event.data, closedAt: event.occurredAt }) }));
     });
     return () => stream.close();
   }, [activityId]);
 
-  const currentRound = snapshot.currentRound;
-  const blanks: RoundBlankSnapshot[] = currentRound?.blanks?.length ? currentRound.blanks : [{ label: null, prompt: currentRound?.prompt ?? "" }];
+  function updateDraft(roundId: string, index: number, value: string) {
+    setDrafts((current) => {
+      const next = [...(current[roundId] ?? [])];
+      next[index] = value;
+      return { ...current, [roundId]: next };
+    });
+  }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(round: ActivityRoundSnapshot, event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const round = snapshot.currentRound;
-    if (!round || round.phase !== "open" || busy) return;
-    setBusy(true);
-    setError("");
+    if (round.phase !== "open" || busyRounds[round.roundId]) return;
+    setBusyRounds((current) => ({ ...current, [round.roundId]: true }));
+    setErrors((current) => ({ ...current, [round.roundId]: "" }));
     try {
-      const response = await fetch(`/api/activities/${activityId}/rounds/${round.roundId}/submissions`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ answers: blanks.map((_, index) => (answers[index] ?? "").trim()), requestId: crypto.randomUUID() }),
+      const answers = roundBlanks(round).map((_, index) => drafts[round.roundId]?.[index] ?? "");
+      const receipt = await submitStudentAnswers(activityId, round.roundId, answers);
+      // Show the receipt immediately; the live receipt event carries the same data.
+      setSnapshot((current) => ({ ...current, rounds: applySubmission(current.rounds, round.roundId, receipt) }));
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[round.roundId];
+        return next;
       });
-      const body = await response.json() as { error?: { message?: string } };
-      if (!response.ok) throw new Error(body.error?.message ?? "無法送出答案。");
-      setAnswers([]);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "連線失敗，請重試。");
+      setErrors((current) => ({ ...current, [round.roundId]: caught instanceof Error ? caught.message : "連線失敗，請重試。" }));
     } finally {
-      setBusy(false);
+      setBusyRounds((current) => ({ ...current, [round.roundId]: false }));
     }
   }
 
-  const round = snapshot.currentRound;
-  const ownSubmission = round?.submissions.find((submission) => submission.groupId === groupId);
+  const openRounds = snapshot.rounds.filter((round) => round.phase === "open");
+  const closedRounds = snapshot.rounds.filter((round) => round.phase === "closed");
 
   return (
     <section className="student-round" aria-live="polite">
       <div className="student-round-status">
-        <span className={`phase-pill ${round?.phase === "open" ? "phase-live" : "phase-waiting"}`}><i />{round?.phase === "open" ? "搶答進行中" : round?.phase === "closed" ? "本題已結束" : "等待老師開題"}</span>
+        <span className={`phase-pill ${openRounds.length ? "phase-live" : "phase-waiting"}`}><i />{openRounds.length ? `${openRounds.length} 題搶答進行中` : "等待老師開題"}</span>
         <span className="connection"><i className={connected ? "" : "connection-idle"} />{connected ? "即時連線" : "連線中斷"}</span>
       </div>
-      {round ? (
-        <>
-          <div className="student-question">
-            <p className="eyebrow">QUESTION {round.questionNumber.padStart(2, "0")}{round.kind === "group" ? ` · 題組 ${blanks.length} 小題` : ""}</p>
-            <h2>{round.prompt}</h2>
-          </div>
-          {round.phase === "open" && !ownSubmission && (
-            <StudentAnswerForm blanks={blanks} answers={answers} busy={busy} error={error} onAnswerChange={(index, value) => setAnswers((current) => { const next = [...current]; next[index] = value; return next; })} onSubmit={submit} />
-          )}
-          {round.phase === "open" && ownSubmission && <p className="receipt-message" role="status"><Check size={17} />答案已送達，等待老師公布結果。</p>}
-          {round.phase === "closed" && (
-            <section className="final-result" aria-labelledby="result-heading">
-              <div className="section-heading"><h3 id="result-heading">最終結果</h3><span>{round.winnerGroupId ? `最快：${round.winnerGroupId}` : "本題無人作答"}</span></div>
-              <ol className="result-list">
-                {round.submissions.map((submission) => <li key={submission.groupId}><span>{submission.acceptedOrder.toString().padStart(2, "0")}</span><strong>{submission.groupId}</strong><SubmissionAnswer submission={submission} blanks={round.blanks} />{submission.groupId === round.winnerGroupId && <Check size={16} aria-label="搶答成功" />}</li>)}
-              </ol>
-            </section>
-          )}
-        </>
-      ) : <div className="student-waiting"><RadioTower size={22} /><p>老師尚未開啟題目</p><small>開始後題目會自動顯示。</small></div>}
+
+      {openRounds.length > 0 ? (
+        <ol className="student-round-list" aria-label="開放中的題目">
+          {openRounds.map((round) => {
+            const ownSubmission = round.submissions.find((submission) => submission.groupId === groupId);
+            const headingId = `question-${round.questionNumber}-heading`;
+            return (
+              <li className="student-round-card" key={round.roundId} aria-labelledby={headingId}>
+                <div className="student-question">
+                  <p className="eyebrow">{questionLabel(round)}</p>
+                  <h2 id={headingId}>{round.prompt}</h2>
+                </div>
+                {ownSubmission ? (
+                  <p className="receipt-message" role="status"><Check size={17} />答案已送達，等待老師公布結果。</p>
+                ) : (
+                  <StudentAnswerForm
+                    fieldIdPrefix={`question-${round.questionNumber}`}
+                    blanks={roundBlanks(round)}
+                    answers={drafts[round.roundId] ?? []}
+                    busy={Boolean(busyRounds[round.roundId])}
+                    error={errors[round.roundId] ?? ""}
+                    onAnswerChange={(index, value) => updateDraft(round.roundId, index, value)}
+                    onSubmit={(event) => submit(round, event)}
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <div className="student-waiting"><RadioTower size={22} /><p>{closedRounds.length ? "目前沒有開放中的題目" : "老師尚未開啟題目"}</p><small>老師開放題目後會自動顯示，可能一次開放多題。</small></div>
+      )}
+
+      {closedRounds.length > 0 && (
+        <section className="student-results" aria-labelledby="student-results-heading">
+          <div className="section-heading"><h2 id="student-results-heading">已公布結果</h2><span>{closedRounds.length} 題</span></div>
+          <ol className="student-round-list">
+            {closedRounds.map((round) => (
+              <li className="final-result" key={round.roundId}>
+                <div className="section-heading">
+                  <h3>第 {round.questionNumber} 題最終結果</h3>
+                  <span>{round.winnerGroupId ? `最快：${round.winnerGroupId}` : "本題無人作答"}</span>
+                </div>
+                <p className="final-result-prompt">{round.prompt}</p>
+                <ol className="result-list">
+                  {round.submissions.map((submission) => (
+                    <li key={submission.groupId}>
+                      <span>{submission.acceptedOrder.toString().padStart(2, "0")}</span>
+                      <strong>{submission.groupId}</strong>
+                      <SubmissionAnswer submission={submission} blanks={round.blanks} />
+                      {submission.groupId === round.winnerGroupId && <Check size={16} aria-label="搶答成功" />}
+                    </li>
+                  ))}
+                </ol>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
     </section>
   );
 }

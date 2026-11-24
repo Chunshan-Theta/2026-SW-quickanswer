@@ -2,7 +2,13 @@ local activityRaw = redis.call("GET", KEYS[1])
 if not activityRaw then return cjson.encode({ error = "NOT_FOUND" }) end
 local activity = cjson.decode(activityRaw)
 local roundPhase = redis.call("HGET", KEYS[2], "phase")
-if roundPhase ~= "open" or activity.currentRoundId ~= ARGV[1] then return cjson.encode({ error = "ROUND_CLOSED" }) end
+-- Several questions may be open at once; the round must be the open round of its question
+-- in this activity (which also rejects round ids that belong to another activity).
+local roundQuestion = redis.call("HGET", KEYS[2], "questionNumber")
+local openRounds = activity.openRoundIdsByQuestion
+if roundPhase ~= "open" or not roundQuestion or type(openRounds) ~= "table" or openRounds[roundQuestion] ~= ARGV[1] then
+  return cjson.encode({ error = "ROUND_CLOSED" })
+end
 local groupExists = false
 for _, groupName in ipairs(activity.groupNames or {}) do
   if groupName == ARGV[2] then groupExists = true break end

@@ -2,15 +2,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getRequestSession: vi.fn(),
-  openRound: vi.fn(),
+  openRounds: vi.fn(),
   closeRound: vi.fn(),
+  closeAllOpenRounds: vi.fn(),
   submitAnswer: vi.fn(),
 }));
 vi.mock("@/server/auth/session", () => ({ getRequestSession: mocks.getRequestSession }));
-vi.mock("@/server/redis/round-store", () => ({ openRound: mocks.openRound, closeRound: mocks.closeRound, submitAnswer: mocks.submitAnswer }));
+vi.mock("@/server/redis/round-store", () => ({
+  openRounds: mocks.openRounds,
+  closeRound: mocks.closeRound,
+  closeAllOpenRounds: mocks.closeAllOpenRounds,
+  submitAnswer: mocks.submitAnswer,
+}));
 
 import { POST as open } from "@/app/api/activities/[activityId]/rounds/open/route";
 import { POST as close } from "@/app/api/activities/[activityId]/rounds/[roundId]/close/route";
+import { POST as closeAll } from "@/app/api/activities/[activityId]/rounds/close-all/route";
 import { POST as submit } from "@/app/api/activities/[activityId]/rounds/[roundId]/submissions/route";
 
 const teacher = { sub: "teacher-1", role: "teacher", exp: 4_000_000_000 };
@@ -28,20 +35,54 @@ function request(body?: unknown) {
 describe("round controls and submission routes", () => {
   afterEach(() => vi.resetAllMocks());
 
-  it("allows a teacher to open a question", async () => {
+  const openedRound = (questionNumber: string, stateVersion: number) => ({ roundId: `round-${questionNumber}`, questionNumber, prompt: "Q?", kind: "single", blanks: [{ label: null, prompt: "Q?" }], phase: "open", openedAt: "t", stateVersion });
+
+  it("keeps the legacy single-question open request and response", async () => {
     mocks.getRequestSession.mockReturnValue(teacher);
-    mocks.openRound.mockResolvedValue({ roundId: "round-1", phase: "open" });
+    mocks.openRounds.mockResolvedValue({ rounds: [openedRound("1", 1)], stateVersion: 1 });
     const response = await open(request({ questionNumber: "1" }), activityParams);
     expect(response.status).toBe(200);
-    expect(mocks.openRound).toHaveBeenCalledWith("activity-1", "teacher-1", "1");
+    expect(await response.json()).toEqual(openedRound("1", 1));
+    expect(mocks.openRounds).toHaveBeenCalledWith("activity-1", "teacher-1", ["1"]);
+  });
+
+  it("opens several questions in one request", async () => {
+    mocks.getRequestSession.mockReturnValue(teacher);
+    const result = { rounds: [openedRound("1", 1), openedRound("3", 2)], stateVersion: 2 };
+    mocks.openRounds.mockResolvedValue(result);
+    const response = await open(request({ questionNumbers: ["1", "3"] }), activityParams);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(result);
+    expect(mocks.openRounds).toHaveBeenCalledWith("activity-1", "teacher-1", ["1", "3"]);
+  });
+
+  it("rejects invalid open requests before they reach the round store", async () => {
+    mocks.getRequestSession.mockReturnValue(teacher);
+    for (const body of [{}, { questionNumbers: [] }, { questionNumbers: ["1", "1"] }, { questionNumber: "x" }]) {
+      expect((await open(request(body), activityParams)).status).toBe(422);
+    }
+    expect(mocks.openRounds).not.toHaveBeenCalled();
   });
 
   it("rejects students from opening or closing rounds", async () => {
     mocks.getRequestSession.mockReturnValue(student);
     expect((await open(request({ questionNumber: "1" }), activityParams)).status).toBe(403);
+    expect((await open(request({ questionNumbers: ["1", "2"] }), activityParams)).status).toBe(403);
     expect((await close(request(), roundParams)).status).toBe(403);
-    expect(mocks.openRound).not.toHaveBeenCalled();
+    expect((await closeAll(request(), activityParams)).status).toBe(403);
+    expect(mocks.openRounds).not.toHaveBeenCalled();
     expect(mocks.closeRound).not.toHaveBeenCalled();
+    expect(mocks.closeAllOpenRounds).not.toHaveBeenCalled();
+  });
+
+  it("closes every open round using the authenticated teacher identity", async () => {
+    mocks.getRequestSession.mockReturnValue(teacher);
+    const result = { rounds: [{ phase: "closed", roundId: "round-1", questionNumber: "1", winnerGroupId: null, submissions: [], closedAt: "t", stateVersion: 3 }], stateVersion: 3 };
+    mocks.closeAllOpenRounds.mockResolvedValue(result);
+    const response = await closeAll(request(), activityParams);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(result);
+    expect(mocks.closeAllOpenRounds).toHaveBeenCalledWith("activity-1", "teacher-1");
   });
 
   it("closes a round using the authenticated teacher identity", async () => {

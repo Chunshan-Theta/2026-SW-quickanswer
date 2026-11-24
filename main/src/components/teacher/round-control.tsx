@@ -1,163 +1,172 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Check, Clipboard, LoaderCircle, RadioTower, Square } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, Clipboard, LoaderCircle, RadioTower, RotateCcw, Square, Upload } from "lucide-react";
 import { SubmissionAnswer } from "@/components/shared/submission-answer";
-import type { ActivitySubmissionSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
+import {
+  applyRoundClosed,
+  applyRoundOpened,
+  applySubmission,
+  applyWritebackStatus,
+  formatElapsed,
+  questionStatus,
+  roundsByQuestion,
+  type QuestionStatus,
+  type RoundClosedData,
+  type RoundOpenedData,
+} from "@/features/activities/domain/round-state";
+import type { ActivityRoundSnapshot, ActivitySnapshot, ActivitySubmissionSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
 
-type Submission = ActivitySubmissionSnapshot;
-type WritebackJob = { jobId: string; status: string; attempt: number; errorCode?: string | null };
-type Round = {
-  roundId: string;
-  questionNumber: string;
-  prompt: string;
-  kind?: "single" | "group";
-  blanks?: RoundBlankSnapshot[];
-  phase: string;
-  winnerGroupId: string | null;
-  submissions: Submission[];
-  writebackJob?: WritebackJob;
-};
+type Question = { questionNumber: string; prompt: string; kind?: "single" | "group"; mappingStatus: string; blanks?: RoundBlankSnapshot[] };
 type ActivityView = {
   activityId: string;
   joinCode: string;
   phase: string;
   groupNames: string[];
   completedQuestionNumbers: string[];
-  questions: Array<{ questionNumber: string; prompt: string; kind?: "single" | "group"; mappingStatus: string; blanks?: RoundBlankSnapshot[] }>;
-  currentRound: Round | null;
-  completedRounds?: Round[];
+  questions: Question[];
+  rounds: ActivityRoundSnapshot[];
 };
-type ApiResult = {
-  error?: { message?: string };
-  roundId?: string;
-  questionNumber?: string;
-  prompt?: string;
-  kind?: "single" | "group";
-  blanks?: RoundBlankSnapshot[];
-  winnerGroupId?: string | null;
-  submissions?: Submission[];
-  jobId?: string;
-  status?: string;
-  attempt?: number;
+type LiveEvent<T> = { stateVersion: number; occurredAt?: string; data: T };
+type WritebackJobData = { jobId: string; roundId: string; status: string; attempt?: number; errorCode?: string | null };
+type ClosedRoundResult = RoundClosedData & { questionNumber: string };
+
+const statusLabels: Record<QuestionStatus, string> = {
+  unconfirmed: "作答格未確認",
+  idle: "未開放",
+  open: "搶答中",
+  closed: "已結束",
+  "writeback-pending": "已結束 · 回填中",
+  "writeback-succeeded": "已結束 · 已回填",
+  "writeback-failed": "已結束 · 回填失敗",
 };
 
-const busyWritebackStatuses = ["queued", "running", "retryable", "succeeded", "failed"];
-
-function writebackLabel(job?: WritebackJob): string {
-  if (job?.status === "succeeded") return "已回填至工作表";
-  if (job?.status === "failed") return "回填失敗";
-  return job?.status ? "回填處理中" : "回填得獎答案";
+function readEvent<T>(message: Event): LiveEvent<T> {
+  return JSON.parse((message as MessageEvent<string>).data) as LiveEvent<T>;
 }
 
-function upsertRound(rounds: Round[], round: Round): Round[] {
-  return [...rounds.filter((item) => item.roundId !== round.roundId), round]
-    .sort((left, right) => Number(left.questionNumber) - Number(right.questionNumber));
+async function postJson<T>(url: string, body?: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  });
+  const result = await response.json().catch(() => ({})) as T & { error?: { message?: string } };
+  if (!response.ok) throw new Error(result.error?.message ?? "操作失敗，請稍後再試。");
+  return result;
+}
+
+/** Mirrors the server rule: the activity completes once every question has a closed round. */
+function activityPhase(questions: Question[], rounds: ActivityRoundSnapshot[]): string {
+  return rounds.filter((round) => round.phase === "closed").length >= questions.length ? "completed" : "active";
+}
+
+function questionBlanks(question: Question): RoundBlankSnapshot[] {
+  return question.blanks?.length ? question.blanks : [{ label: null, prompt: question.prompt }];
 }
 
 export function TeacherRoundControl({ activity: initialActivity }: { activity: ActivityView }) {
-  const router = useRouter();
-  const [activity, setActivity] = useState<ActivityView>({ ...initialActivity, completedRounds: initialActivity.completedRounds ?? [] });
-  const [selectedQuestion, setSelectedQuestion] = useState(initialActivity.questions.find((question) => question.mappingStatus === "confirmed" && !initialActivity.completedQuestionNumbers.includes(question.questionNumber))?.questionNumber ?? "");
-  const [busy, setBusy] = useState(false);
+  const [activity, setActivity] = useState<ActivityView>(initialActivity);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  const roundIndex = useMemo(() => roundsByQuestion(activity.rounds), [activity.rounds]);
+  const statuses = new Map(activity.questions.map((question) => [question.questionNumber, questionStatus(question, roundIndex.get(question.questionNumber))]));
+  const completed = activity.phase === "completed";
+  const openableNumbers = completed ? [] : activity.questions.filter((question) => statuses.get(question.questionNumber) === "idle").map((question) => question.questionNumber);
+  // A question that stopped being openable (e.g. opened from another window) drops out of the selection.
+  const selectedNumbers = openableNumbers.filter((questionNumber) => selected.has(questionNumber));
+  const openCount = activity.rounds.filter((round) => round.phase === "open").length;
+  const hasOpenRounds = openCount > 0;
+  const busy = pending !== null;
 
   useEffect(() => {
     const stream = new EventSource(`/api/activities/${activity.activityId}/events`);
     stream.addEventListener("activity.snapshot", (message) => {
-      const snapshot = JSON.parse((message as MessageEvent<string>).data) as Partial<ActivityView>;
-      setActivity((current) => ({ ...current, ...snapshot, completedRounds: current.completedRounds }));
+      const snapshot = JSON.parse((message as MessageEvent<string>).data) as ActivitySnapshot;
+      setActivity((current) => ({ ...current, phase: snapshot.phase, rounds: snapshot.rounds }));
     });
     stream.addEventListener("phase.changed", (message) => {
-      const event = JSON.parse((message as MessageEvent<string>).data) as { data: { roundId: string; questionNumber: string; prompt: string; kind?: "single" | "group"; blanks?: RoundBlankSnapshot[]; phase: "open" | "closed" } };
-      if (event.data.phase === "open") {
-        setActivity((current) => ({ ...current, phase: "active", currentRound: { ...event.data, winnerGroupId: null, submissions: [] } }));
-      }
+      const event = readEvent<RoundOpenedData & { phase: string }>(message);
+      if (event.data.phase !== "open") return;
+      setActivity((current) => ({ ...current, phase: "active", rounds: applyRoundOpened(current.rounds, { ...event.data, openedAt: event.occurredAt }) }));
     });
     stream.addEventListener("submission.accepted", (message) => {
-      const event = JSON.parse((message as MessageEvent<string>).data) as { data: Submission & { roundId: string; winnerGroupId: string } };
-      setActivity((current) => {
-        if (current.currentRound?.roundId !== event.data.roundId) return current;
-        const submissions = [...current.currentRound.submissions.filter((submission) => submission.groupId !== event.data.groupId), event.data].sort((a, b) => a.acceptedOrder - b.acceptedOrder);
-        return { ...current, currentRound: { ...current.currentRound, winnerGroupId: event.data.winnerGroupId, submissions } };
-      });
+      const event = readEvent<ActivitySubmissionSnapshot & { roundId: string; winnerGroupId: string }>(message);
+      setActivity((current) => ({ ...current, rounds: applySubmission(current.rounds, event.data.roundId, event.data, event.data.winnerGroupId) }));
     });
     stream.addEventListener("results.finalized", (message) => {
-      const event = JSON.parse((message as MessageEvent<string>).data) as { data: { roundId: string; questionNumber: string; phase: "closed"; winnerGroupId: string | null; submissions: Submission[] } };
+      const event = readEvent<ClosedRoundResult>(message);
       setActivity((current) => {
-        if (current.currentRound?.roundId !== event.data.roundId) return current;
-        const completedQuestionNumbers = [...new Set([...current.completedQuestionNumbers, event.data.questionNumber])];
-        const closedRound: Round = { ...current.currentRound, phase: "closed", winnerGroupId: event.data.winnerGroupId, submissions: event.data.submissions };
-        return {
-          ...current,
-          phase: completedQuestionNumbers.length >= current.questions.filter((question) => question.mappingStatus === "confirmed").length ? "completed" : "active",
-          completedQuestionNumbers,
-          currentRound: closedRound,
-          completedRounds: upsertRound(current.completedRounds ?? [], closedRound),
-        };
+        const rounds = applyRoundClosed(current.rounds, { ...event.data, closedAt: event.occurredAt });
+        return { ...current, rounds, phase: activityPhase(current.questions, rounds) };
       });
     });
     stream.addEventListener("writeback.status", (message) => {
-      const event = JSON.parse((message as MessageEvent<string>).data) as { data: WritebackJob & { roundId: string } };
-      setActivity((current) => ({
-        ...current,
-        currentRound: current.currentRound?.roundId === event.data.roundId ? { ...current.currentRound, writebackJob: event.data } : current.currentRound,
-        completedRounds: (current.completedRounds ?? []).map((round) => round.roundId === event.data.roundId ? { ...round, writebackJob: event.data } : round),
-      }));
+      const event = readEvent<WritebackJobData>(message);
+      setActivity((current) => ({ ...current, rounds: applyWritebackStatus(current.rounds, event.data.roundId, event.data) }));
     });
     return () => stream.close();
   }, [activity.activityId]);
 
-  async function openQuestion() {
-    setBusy(true);
+  useEffect(() => {
+    if (!hasOpenRounds) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasOpenRounds]);
+
+  async function run(action: string, task: () => Promise<void>) {
+    setPending(action);
     setError("");
     try {
-      const response = await fetch(`/api/activities/${activity.activityId}/rounds/open`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ questionNumber: selectedQuestion }),
-      });
-      const body = await response.json() as ApiResult;
-      if (!response.ok) throw new Error(body.error?.message ?? "無法開啟題目。");
-      setActivity((current) => ({ ...current, phase: "active", currentRound: { roundId: body.roundId!, questionNumber: body.questionNumber!, prompt: body.prompt!, kind: body.kind, blanks: body.blanks, phase: "open", winnerGroupId: null, submissions: [] } }));
-      router.refresh();
+      await task();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "目前無法開啟題目。");
+      setError(caught instanceof Error ? caught.message : "操作失敗，請稍後再試。");
     } finally {
-      setBusy(false);
+      setPending(null);
     }
   }
 
-  async function closeQuestion() {
-    const round = activity.currentRound;
-    if (!round || round.phase !== "open") return;
-    setBusy(true);
-    setError("");
-    try {
-      const response = await fetch(`/api/activities/${activity.activityId}/rounds/${round.roundId}/close`, { method: "POST" });
-      const body = await response.json() as ApiResult;
-      if (!response.ok) throw new Error(body.error?.message ?? "無法結束搶答。");
-      const completedQuestionNumbers = [...new Set([...activity.completedQuestionNumbers, round.questionNumber])];
-      setActivity((current) => {
-        if (current.currentRound?.roundId !== round.roundId) return current;
-        const closedRound: Round = { ...current.currentRound, phase: "closed", winnerGroupId: body.winnerGroupId ?? null, submissions: body.submissions ?? [] };
-        return {
-          ...current,
-          phase: completedQuestionNumbers.length >= current.questions.filter((question) => question.mappingStatus === "confirmed").length ? "completed" : "active",
-          completedQuestionNumbers,
-          currentRound: closedRound,
-          completedRounds: upsertRound(current.completedRounds ?? [], closedRound),
-        };
-      });
-      router.refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "目前無法結束搶答。");
-    } finally {
-      setBusy(false);
-    }
+  function toggleQuestion(questionNumber: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(questionNumber)) next.delete(questionNumber);
+      else next.add(questionNumber);
+      return next;
+    });
   }
+
+  function toggleAll() {
+    setSelected(selectedNumbers.length === openableNumbers.length ? new Set() : new Set(openableNumbers));
+  }
+
+  const openSelected = () => run("open", async () => {
+    const result = await postJson<{ rounds: RoundOpenedData[] }>(`/api/activities/${activity.activityId}/rounds/open`, { questionNumbers: selectedNumbers });
+    setActivity((current) => ({ ...current, phase: "active", rounds: result.rounds.reduce(applyRoundOpened, current.rounds) }));
+    setSelected(new Set());
+  });
+
+  function applyClosed(results: ClosedRoundResult[]) {
+    setActivity((current) => {
+      const rounds = results.reduce(applyRoundClosed, current.rounds);
+      return { ...current, rounds, phase: activityPhase(current.questions, rounds) };
+    });
+  }
+
+  const closeOne = (round: ActivityRoundSnapshot) => run(`close:${round.roundId}`, async () => {
+    applyClosed([await postJson<ClosedRoundResult>(`/api/activities/${activity.activityId}/rounds/${round.roundId}/close`)]);
+  });
+
+  const closeAll = () => run("close-all", async () => {
+    applyClosed((await postJson<{ rounds: ClosedRoundResult[] }>(`/api/activities/${activity.activityId}/rounds/close-all`)).rounds);
+  });
+
+  const queueWriteback = (round: ActivityRoundSnapshot) => run(`writeback:${round.roundId}`, async () => {
+    const job = await postJson<{ jobId: string; status: string; attempt?: number }>(`/api/activities/${activity.activityId}/rounds/${round.roundId}/writeback`, { requestId: crypto.randomUUID() });
+    setActivity((current) => ({ ...current, rounds: applyWritebackStatus(current.rounds, round.roundId, job) }));
+  });
 
   async function copyJoinCode() {
     try {
@@ -169,46 +178,7 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
     }
   }
 
-  async function queueWriteback(round: Round) {
-    if (round.phase !== "closed" || !round.winnerGroupId || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const response = await fetch(`/api/activities/${activity.activityId}/rounds/${round.roundId}/writeback`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ requestId: crypto.randomUUID() }),
-      });
-      const body = await response.json() as ApiResult;
-      if (!response.ok) throw new Error(body.error?.message ?? "無法排入答案回填。");
-      const writebackJob = { jobId: body.jobId!, status: body.status!, attempt: body.attempt ?? 0 };
-      setActivity((current) => ({
-        ...current,
-        currentRound: current.currentRound?.roundId === round.roundId ? { ...current.currentRound, writebackJob } : current.currentRound,
-        completedRounds: (current.completedRounds ?? []).map((item) => item.roundId === round.roundId ? { ...item, writebackJob } : item),
-      }));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "目前無法排入答案回填。");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function writebackControl(round: Round) {
-    if (!round.winnerGroupId) return null;
-    return (
-      <div className="writeback-status">
-        <button className="secondary-action" disabled={busy || busyWritebackStatuses.includes(round.writebackJob?.status ?? "")} type="button" onClick={() => queueWriteback(round)}>
-          {writebackLabel(round.writebackJob)}
-        </button>
-        {round.writebackJob && <p className="form-message form-notice" role="status">回填狀態：{round.writebackJob.status}{round.writebackJob.errorCode ? ` · ${round.writebackJob.errorCode}` : ""}</p>}
-      </div>
-    );
-  }
-
-  const round = activity.currentRound;
-  const remainingQuestions = activity.questions.filter((question) => question.mappingStatus === "confirmed" && !activity.completedQuestionNumbers.includes(question.questionNumber));
-  const earlierRounds = (activity.completedRounds ?? []).filter((item) => item.roundId !== round?.roundId);
+  const spinner = <LoaderCircle className="spin" size={16} />;
 
   return (
     <div className="teacher-control-layout">
@@ -216,63 +186,130 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
         <div><p className="eyebrow">STUDENT JOIN CODE</p><p className="join-code-value">{activity.joinCode}</p><small>學生輸入此代碼後選擇組別加入</small></div>
         <button className="secondary-action" type="button" onClick={copyJoinCode}>{copied ? <Check size={15} /> : <Clipboard size={15} />}{copied ? "已複製" : "複製代碼"}</button>
       </section>
-      <section className="round-control-panel" aria-labelledby="round-control-title">
-        <div className="section-heading"><h2 id="round-control-title">題目控制</h2><span>{activity.phase === "completed" ? "活動已完成" : round?.phase === "open" ? "搶答進行中" : "等待開題"}</span></div>
-        {!round || round.phase === "closed" ? (
-          <div className="open-question-row">
-            <label className="field-label" htmlFor="question-number">選擇題目
-              <select id="question-number" disabled={activity.phase === "completed" || busy} value={selectedQuestion} onChange={(event) => setSelectedQuestion(event.target.value)}>
-                {remainingQuestions.map((question) => <option key={question.questionNumber} value={question.questionNumber}>第 {question.questionNumber} 題{question.kind === "group" ? `（題組 · ${question.blanks?.length ?? 0} 小題）` : ""} · {question.prompt}</option>)}
-              </select>
-            </label>
-            <button className="primary-action" disabled={activity.phase === "completed" || !selectedQuestion || busy} type="button" onClick={openQuestion}>{busy ? <LoaderCircle className="spin" size={17} /> : <RadioTower size={16} />}開啟搶答</button>
+
+      <section className="question-board" aria-labelledby="question-board-title">
+        <div className="question-board-toolbar">
+          <div className="question-board-summary">
+            <h2 id="question-board-title">題目控制</h2>
+            <span aria-live="polite">{completed ? "活動已完成" : `已選 ${selectedNumbers.length} 題 · 搶答中 ${openCount} 題`}</span>
           </div>
-        ) : (
-          <div className="active-round-panel">
-            <div className="active-question">
-              <p className="eyebrow">QUESTION {round.questionNumber.padStart(2, "0")}{round.kind === "group" ? ` · 題組 ${round.blanks?.length ?? 0} 小題` : ""}</p>
-              <h3>{round.prompt}</h3>
-            </div>
-            <div className="group-status-list">
-              {activity.groupNames.map((groupName) => {
-                const submission = round.submissions.find((item) => item.groupId === groupName);
-                return <div className="group-status-row" key={groupName}><span className="group-status-name">{groupName}</span><span className={submission ? "group-status-submitted" : "group-status-waiting"}>{submission ? `已提交 · 第 ${submission.acceptedOrder} 位` : "等待作答"}</span>{submission && <SubmissionAnswer submission={submission} blanks={round.blanks} />}</div>;
-              })}
-            </div>
-            <button className="end-round-action" disabled={busy} type="button" onClick={closeQuestion}>{busy ? <LoaderCircle className="spin" size={17} /> : <Square size={15} />}結束本題</button>
+          <div className="question-board-actions">
+            <button className="secondary-action" disabled={busy || openableNumbers.length === 0} type="button" onClick={toggleAll}>
+              {openableNumbers.length > 0 && selectedNumbers.length === openableNumbers.length ? "取消全選" : "全選未開放"}
+            </button>
+            <button className="primary-action" disabled={busy || selectedNumbers.length === 0} type="button" onClick={openSelected}>
+              {pending === "open" ? spinner : <RadioTower size={16} />}開放所選題目
+            </button>
+            <button className="end-round-action" disabled={busy || !hasOpenRounds} type="button" onClick={closeAll}>
+              {pending === "close-all" ? spinner : <Square size={15} />}結束全部開放中
+            </button>
           </div>
-        )}
+        </div>
         {error && <p className="form-message form-error" role="alert">{error}</p>}
-        {round?.phase === "closed" && (
-          <section className="final-result" aria-labelledby="teacher-result-heading">
-            <div className="section-heading"><h3 id="teacher-result-heading">第 {round.questionNumber} 題最終結果</h3><span>{round.winnerGroupId ? `搶答成功：${round.winnerGroupId}` : "本題無人作答。"}</span></div>
-            <ol className="result-list">
-              {round.submissions.map((submission) => <li key={submission.groupId}><span>{submission.acceptedOrder.toString().padStart(2, "0")}</span><strong>{submission.groupId}</strong><SubmissionAnswer submission={submission} blanks={round.blanks} /></li>)}
-            </ol>
-            {writebackControl(round)}
-          </section>
-        )}
-      </section>
-      {earlierRounds.length > 0 && (
-        <section className="completed-rounds" aria-labelledby="completed-rounds-heading">
-          <div className="section-heading"><h2 id="completed-rounds-heading">已結束題目</h2><span>{earlierRounds.length} 題 · 可個別回填</span></div>
-          <ol className="completed-round-list">
-            {earlierRounds.map((item) => {
-              const winner = item.submissions.find((submission) => submission.groupId === item.winnerGroupId);
-              return (
-                <li className="completed-round" key={item.roundId}>
-                  <div className="completed-round-heading">
-                    <strong>第 {item.questionNumber} 題{item.kind === "group" ? "（題組）" : ""}</strong>
-                    <span>{item.winnerGroupId ? `搶答成功：${item.winnerGroupId}` : "本題無人作答"}</span>
+
+        <ol className="question-card-list">
+          {activity.questions.map((question) => {
+            const round = roundIndex.get(question.questionNumber);
+            const status = statuses.get(question.questionNumber) ?? "idle";
+            const selectable = openableNumbers.includes(question.questionNumber);
+            const isSelected = selectable && selected.has(question.questionNumber);
+            const blanks = questionBlanks(question);
+            const isGroup = question.kind === "group";
+            // A group prompt is often just its sub-prompts joined; avoid showing the text twice.
+            const showPrompt = !isGroup || question.prompt !== blanks.map((blank) => blank.prompt).filter(Boolean).join("／");
+            const title = (
+              <>
+                <span className="question-card-number">{question.questionNumber.padStart(2, "0")}</span>
+                <span className="question-card-kind">{isGroup ? `題組 · ${blanks.length} 小題` : "單題"}</span>
+              </>
+            );
+            return (
+              <li className={`question-card question-card-${status}${isSelected ? " question-card-selected" : ""}`} key={question.questionNumber}>
+                <div className="question-card-header">
+                  {selectable ? (
+                    <label className="question-card-select">
+                      <input aria-label={`選取第 ${question.questionNumber} 題`} checked={isSelected} disabled={busy} type="checkbox" onChange={() => toggleQuestion(question.questionNumber)} />
+                      {title}
+                    </label>
+                  ) : (
+                    <div className="question-card-select"><span className="question-card-check-spacer" aria-hidden="true" />{title}</div>
+                  )}
+                  <span className={`status-badge status-badge-${status}`}>
+                    {status === "open" && round ? <><i aria-hidden="true" />搶答中 <time suppressHydrationWarning>{formatElapsed(round.openedAt, now)}</time></> : statusLabels[status]}
+                  </span>
+                </div>
+
+                <div className="question-card-body">
+                  {showPrompt && <p className="question-card-prompt">{question.prompt}</p>}
+                  {isGroup && (
+                    <ol className="question-card-blanks">
+                      {blanks.map((blank, index) => <li key={index}><span>{blank.label ?? `（${index + 1}）`}</span><span>{blank.prompt}</span></li>)}
+                    </ol>
+                  )}
+                </div>
+
+                {round?.phase === "open" && (
+                  <div className="live-ranking">
+                    <div className="live-ranking-heading"><span>即時排名</span><span>{round.submissions.length} / {activity.groupNames.length} 組已作答</span></div>
+                    <ol className="live-ranking-list" aria-label={`第 ${question.questionNumber} 題即時排名`}>
+                      {round.submissions.map((submission) => (
+                        <li className="live-ranking-row live-ranking-submitted" key={submission.groupId}>
+                          <span className="live-ranking-order">{submission.acceptedOrder.toString().padStart(2, "0")}</span>
+                          <strong>{submission.groupId}</strong>
+                          <SubmissionAnswer submission={submission} blanks={round.blanks} />
+                        </li>
+                      ))}
+                      {activity.groupNames.filter((groupName) => !round.submissions.some((submission) => submission.groupId === groupName)).map((groupName) => (
+                        <li className="live-ranking-row" key={groupName}>
+                          <span className="live-ranking-order">—</span>
+                          <strong>{groupName}</strong>
+                          <span className="live-ranking-waiting">等待作答</span>
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="question-card-actions">
+                      <button className="end-round-action" disabled={busy} type="button" onClick={() => closeOne(round)}>
+                        {pending === `close:${round.roundId}` ? spinner : <Square size={15} />}結束本題
+                      </button>
+                    </div>
                   </div>
-                  {winner && <SubmissionAnswer submission={winner} blanks={item.blanks} />}
-                  {writebackControl(item)}
-                </li>
-              );
-            })}
-          </ol>
-        </section>
-      )}
+                )}
+
+                {round?.phase === "closed" && (
+                  <div className="closed-summary">
+                    <p className="closed-summary-winner">{round.winnerGroupId ? `搶答成功：${round.winnerGroupId}` : "本題無人作答。"}</p>
+                    {round.submissions.length > 0 && (
+                      <ol className="result-list" aria-label={`第 ${question.questionNumber} 題最終結果`}>
+                        {round.submissions.map((submission) => (
+                          <li key={submission.groupId}>
+                            <span>{submission.acceptedOrder.toString().padStart(2, "0")}</span>
+                            <strong>{submission.groupId}</strong>
+                            <SubmissionAnswer submission={submission} blanks={round.blanks} />
+                            {submission.groupId === round.winnerGroupId && <Check size={16} aria-label="搶答成功" />}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                    {round.winnerGroupId && (
+                      <div className="writeback-status">
+                        <button className="secondary-action" disabled={busy || (round.writebackJob !== undefined && round.writebackJob.status !== "failed")} type="button" onClick={() => queueWriteback(round)}>
+                          {pending === `writeback:${round.roundId}` ? spinner : round.writebackJob?.status === "failed" ? <RotateCcw size={15} /> : <Upload size={15} />}
+                          {!round.writebackJob ? "回填得獎答案" : round.writebackJob.status === "failed" ? "重新回填" : round.writebackJob.status === "succeeded" ? "已回填至工作表" : "回填處理中"}
+                        </button>
+                        {round.writebackJob && (
+                          <p className={`form-message ${round.writebackJob.status === "failed" ? "form-error" : "form-notice"}`} role="status">
+                            回填狀態：{round.writebackJob.status}{round.writebackJob.errorCode ? ` · ${round.writebackJob.errorCode}` : ""}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </section>
     </div>
   );
 }
