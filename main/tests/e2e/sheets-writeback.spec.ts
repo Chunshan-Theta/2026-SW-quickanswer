@@ -107,7 +107,7 @@ test.afterAll(async () => {
   await redis?.quit();
 });
 
-test("teacher queues the winning answer writeback and sees its status", async ({ page, context }) => {
+test("teacher chooses a non-fastest answer to write back and sees its status (005)", async ({ page, context }) => {
   await redis.del([
     `activity:${activityId}:meta`,
     `activity:${activityId}:events`,
@@ -147,9 +147,15 @@ test("teacher queues the winning answer writeback and sees its status", async ({
     httpOnly: true,
     sameSite: "Lax",
   }]);
+  let postedSelection: unknown;
   await page.route(`**/api/activities/${activityId}/rounds/${roundId}/writeback`, async (route) => {
     if (route.request().method() === "POST") {
-      await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ jobId: `${activityId}:${roundId}`, status: "queued" }) });
+      postedSelection = (route.request().postDataJSON() as { selection?: unknown }).selection;
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ jobId: `${activityId}:${roundId}`, status: "queued", existing: false, revision: 1, adopted: { source: "group", groupId: "Red", answer: "Respiration", answers: ["Respiration"] } }),
+      });
       return;
     }
     await route.continue();
@@ -157,8 +163,65 @@ test("teacher queues the winning answer writeback and sees its status", async ({
 
   await page.goto(`/teacher/activities/${activityId}`);
   await expect(page.getByText("Photosynthesis")).toBeVisible();
-  await page.getByRole("button", { name: "回填得獎答案" }).click();
-  await expect(page.getByText("回填狀態：queued")).toBeVisible();
+  // The fastest group is preselected, but the teacher may adopt another group's answer.
+  await expect(page.getByRole("radio", { name: /Blue/ })).toBeChecked();
+  await page.getByRole("radio", { name: /Red/ }).check();
+  await page.getByRole("button", { name: "回填所選答案" }).click();
+  await expect(page.getByText("回填中：Red 的答案…")).toBeVisible();
+  expect(postedSelection).toEqual({ source: "group", groupId: "Red" });
+});
+
+test("teacher can type the correct answer instead of adopting a group's (005)", async ({ page, context }) => {
+  await context.addCookies([{ name: "qa_teacher", value: sessionCookie(), domain: "localhost", path: "/", httpOnly: true, sameSite: "Lax" }]);
+  let postedSelection: unknown;
+  await page.route(`**/api/activities/${activityId}/rounds/${roundId}/writeback`, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    postedSelection = (route.request().postDataJSON() as { selection?: unknown }).selection;
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ jobId: `${activityId}:${roundId}`, status: "queued", adopted: { source: "teacher", groupId: null, answer: "Light reaction", answers: ["Light reaction"] } }) });
+  });
+
+  await page.goto(`/teacher/activities/${activityId}`);
+  await page.getByRole("radio", { name: "自行輸入正確答案" }).check();
+  await expect(page.getByRole("button", { name: "回填所選答案" })).toBeDisabled();
+  await page.getByLabel("正確答案", { exact: true }).fill("Light reaction");
+  await page.getByRole("button", { name: "回填所選答案" }).click();
+  await expect(page.getByText("回填中：老師提供的答案…")).toBeVisible();
+  expect(postedSelection).toEqual({ source: "teacher", answers: ["Light reaction"] });
+});
+
+test("students see only their own answer, then the teacher-adopted answer once published (005)", async ({ browser }) => {
+  const id = "e2e-published-activity";
+  const code = "PUB234";
+  const closedRoundId = "e2e-published-round";
+  await clearActivity(id, code);
+  await seedReadyActivity(id, code);
+  const raw = JSON.parse((await redis.get(`activity:${id}:meta`))!) as Record<string, unknown>;
+  await redis.set(`activity:${id}:meta`, JSON.stringify({ ...raw, phase: "active", roundIdsByQuestion: { 1: closedRoundId }, completedQuestionNumbers: ["1"] }), { EX: 60 });
+  await redis.hSet(`round:${closedRoundId}:state`, { activityId: id, phase: "closed", questionNumber: "1", prompt: "Name the process.", kind: "single", winnerGroupId: "Blue" });
+  await redis.hSet(`round:${closedRoundId}:submissions`, {
+    Blue: JSON.stringify({ groupId: "Blue", answer: "Photosynthesis", answers: ["Photosynthesis"], acceptedOrder: 1, acceptedAt: "t1" }),
+    Red: JSON.stringify({ groupId: "Red", answer: "Respiration", answers: ["Respiration"], acceptedOrder: 2, acceptedAt: "t2" }),
+  });
+  let red: Awaited<ReturnType<typeof joinGroup>> | undefined;
+  try {
+    red = await joinGroup(browser, code, "Red");
+    const card = red.page.locator(".final-result", { hasText: "第 1 題" });
+    await expect(card.getByText("你們的答案 · 第 2 個送出")).toBeVisible();
+    await expect(card.getByText("Respiration")).toBeVisible();
+    await expect(card.getByText("等待老師公布正確答案")).toBeVisible();
+    await expect(red.page.getByText("Photosynthesis")).toHaveCount(0);
+    await expect(red.page.getByText("Blue", { exact: true })).toHaveCount(0);
+
+    await redis.hSet(`round:${closedRoundId}:state`, { publishedSource: "group", publishedGroupId: "Blue", publishedAnswers: JSON.stringify(["Photosynthesis"]), publishedAnswer: "Photosynthesis", publishedAt: "t9" });
+    await red.page.reload();
+    await expect(card.getByText("正確答案（老師採用：Blue）")).toBeVisible();
+    await expect(card.getByText("Photosynthesis")).toBeVisible();
+    await expect(card.getByText("Respiration")).toBeVisible();
+  } finally {
+    await red?.context.close();
+    await redis.del([`round:${closedRoundId}:state`, `round:${closedRoundId}:submissions`]);
+    await clearActivity(id, code);
+  }
 });
 
 test("teacher and students open, answer, close, and see role-filtered results", async ({ browser }) => {
@@ -197,14 +260,15 @@ test("teacher and students open, answer, close, and see role-filtered results", 
     await expect(teacherPage.getByText("Respiration")).toBeVisible();
 
     await teacherPage.getByRole("button", { name: "結束本題" }).click();
-    await expect(teacherPage.getByText("搶答成功：Blue")).toBeVisible();
-    await expect(red.page.getByText("最終結果")).toBeVisible();
-    await expect(red.page.getByText("Photosynthesis")).toBeVisible();
+    await expect(teacherPage.getByText("最快作答：Blue")).toBeVisible();
+    // 005: after close a student still sees only their own answer until the teacher publishes one.
+    await expect(red.page.getByText("等待老師公布正確答案")).toBeVisible();
     await expect(red.page.getByText("Respiration")).toBeVisible();
+    await expect(red.page.getByText("Photosynthesis")).toHaveCount(0);
     await red.page.reload();
-    await expect(red.page.getByText("最終結果")).toBeVisible();
-    await expect(red.page.getByText("Photosynthesis")).toBeVisible();
+    await expect(red.page.getByText("等待老師公布正確答案")).toBeVisible();
     await expect(red.page.getByText("Respiration")).toBeVisible();
+    await expect(red.page.getByText("Photosynthesis")).toHaveCount(0);
   } finally {
     await Promise.all([blue?.context.close(), red?.context.close(), teacherContext.close()]);
     await clearActivity(id, code);
@@ -312,7 +376,7 @@ test("students must answer every blank of a question group in one submission", a
     await expect(teacherPage.getByText("作業系統")).toBeVisible();
 
     await teacherPage.getByRole("button", { name: "結束本題" }).click();
-    await expect(teacherPage.getByText("搶答成功：Blue")).toBeVisible();
+    await expect(teacherPage.getByText("最快作答：Blue")).toBeVisible();
     await expect(blue.page.getByText("中央處理器")).toBeVisible();
   } finally {
     await Promise.all([blue?.context.close(), teacherContext.close()]);
@@ -360,11 +424,12 @@ test("teacher opens several questions at once, groups answer different questions
     await expect(teacherPage.getByText("Photosynthesis")).toBeVisible();
     await expect(teacherPage.getByText("作業系統")).toBeVisible();
     await teacherPage.getByRole("button", { name: "結束全部開放中" }).click();
-    await expect(teacherPage.getByText("搶答成功：Blue")).toBeVisible();
-    await expect(teacherPage.getByText("搶答成功：Red")).toBeVisible();
+    await expect(teacherPage.getByText("最快作答：Blue")).toBeVisible();
+    await expect(teacherPage.getByText("最快作答：Red")).toBeVisible();
     await expect(teacherPage.getByText("活動已完成")).toBeVisible();
-    await expect(red.page.getByText("已公布結果")).toBeVisible();
-    await expect(red.page.getByText("Photosynthesis")).toBeVisible();
+    await expect(red.page.getByText("已結束的題目")).toBeVisible();
+    // 005: Blue's answer to question 1 stays private for Red.
+    await expect(red.page.getByText("Photosynthesis")).toHaveCount(0);
   } finally {
     await Promise.all([blue?.context.close(), red?.context.close(), teacherContext.close()]);
     await clearActivity(id, code);
