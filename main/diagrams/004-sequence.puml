@@ -1,0 +1,78 @@
+@startuml
+title Sequence Diagram - 004 Opening Several Questions at Once
+
+actor Teacher
+participant "Teacher Question Board" as Board
+participant "Open / Close / Close-All Routes" as API
+participant "Round Store (Lua)" as Store
+database "Private Redis" as Redis
+participant "Activity SSE" as Sync
+participant "Student A" as StudentA
+participant "Student B" as StudentB
+participant "Writeback Worker" as Worker
+
+Teacher -> Board : Tick Q1 and Q2, press 開放所選題目
+Board -> API : POST rounds/open { questionNumbers: [1, 2] }
+API -> Store : openRounds(teacher, [1, 2])
+Store -> Redis : EVAL open-rounds.lua
+alt Any question missing / unconfirmed / completed / already open / duplicated
+  Redis --> Store : { error, questionNumber }
+  Store --> API : 409 / 422 with question number
+  API --> Board : Error; nothing opened
+else All questions openable
+  Redis -> Redis : openRoundIdsByQuestion[1..2] = roundIds;\nHSET round hashes; one phase.changed per round
+  Redis --> Store : { rounds: [Q1, Q2], stateVersion }
+  Store --> API : opened rounds
+  API --> Board : 200 rounds[]
+  Sync -> Redis : read events
+  Sync --> Board : phase.changed (Q1), phase.changed (Q2)
+  Sync --> StudentA : phase.changed (Q1, Q2)
+  Sync --> StudentB : phase.changed (Q1, Q2)
+end
+
+par Independent rounds
+  StudentA -> API : POST rounds/{Q2}/submissions answers[]
+  API -> Store : submitAnswer(Q2 round, A)
+  Store -> Redis : EVAL submit-answer.lua\n(open map[Q2] == roundId)
+  Redis --> StudentA : receipt order 1 for Q2
+else
+  StudentB -> API : POST rounds/{Q1}/submissions answers[]
+  API -> Store : submitAnswer(Q1 round, B)
+  Store -> Redis : EVAL submit-answer.lua\n(open map[Q1] == roundId)
+  Redis --> StudentB : receipt order 1 for Q1
+end
+Sync --> Board : submission.accepted (per round)
+
+Teacher -> Board : Tick Q3, press 開放所選題目 (Q1, Q2 still open)
+Board -> API : POST rounds/open { questionNumbers: [3] }
+API --> Board : Q3 opened
+
+Teacher -> Board : 結束本題 on Q1
+Board -> API : POST rounds/{Q1}/close
+API -> Store : closeRound (strict)
+Store -> Redis : EVAL close-rounds.lua [Q1]
+Redis -> Redis : phase closed; remove Q1 from open map;\nresults.finalized (Q1)
+Sync --> StudentA : results.finalized (Q1) - Q2, Q3 stay open
+StudentA -> API : late answer for Q1
+API --> StudentA : 409 此搶答回合已結束 (Q2/Q3 still accept)
+
+Teacher -> Board : 結束全部開放中
+Board -> API : POST rounds/close-all
+API -> Store : closeAllOpenRounds
+Store -> Redis : GET activity (open map: Q2, Q3)
+Store -> Redis : EVAL close-rounds.lua [Q2, Q3] (open-only)
+Redis -> Redis : close both at one instant;\nresults.finalized per round;\nphase = completed when every question is closed
+Redis --> Store : { rounds: [Q2, Q3] }
+API --> Board : closed rounds
+Sync --> StudentA : results.finalized (Q2), (Q3)
+Sync --> StudentB : results.finalized (Q2), (Q3)
+
+opt Per-question writeback
+  Teacher -> Board : 回填得獎答案 on a closed card
+  Board -> API : POST rounds/{roundId}/writeback
+  API -> Redis : enqueue-writeback.lua (re-queue when previous job failed)
+  Worker -> Redis : XREADGROUP job
+  Worker --> Sync : writeback.status
+  Sync --> Board : 回填處理中 / 已回填 / 回填失敗 (重新回填)
+end
+@enduml

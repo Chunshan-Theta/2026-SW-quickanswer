@@ -10,6 +10,7 @@ class Group {
 class Activity {
   phase
   stateVersion
+  openRoundIdsByQuestion
 }
 class Question {
   questionNumber
@@ -47,8 +48,8 @@ class WritebackJob {
 
 Teacher "1" --> "0..*" Activity : controls
 Activity "1" *-- "1..*" Question : contains
-Activity "1" *-- "1..*" Round : runs
-Round "0..*" --> "1" Question : opens
+Activity "1" *-- "0..*" Round : runs (several may be open at once)
+Round "0..1" --> "1" Question : opens (once per question)
 Student "0..*" --> "1" Group : joins as
 Group "1" --> "0..*" Submission : submits
 Round "1" --> "0..*" Submission : receives
@@ -61,6 +62,8 @@ Round "1" --> "0..1" WritebackJob : writes after close
 note right of Submission
   Rank each group by its first accepted answer.
   The earliest accepted answer wins the question.
+  Order and winner are kept per round, so rounds
+  that are open at the same time never affect each other.
 end note
 note bottom of AnswerSlot
   Resolve from the header row, question number and sheet content.

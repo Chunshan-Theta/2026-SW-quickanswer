@@ -1,0 +1,104 @@
+@startuml
+!pragma layout smetana
+title Class Diagram - 004 Multi-Question Rounds
+
+class ActivityRecord {
+  phase : ready | active | completed
+  stateVersion
+  {field} openRoundIdsByQuestion : Map<questionNumber, roundId> (absent when empty)
+  roundIdsByQuestion : Map<questionNumber, roundId>
+  completedQuestionNumbers : questionNumber[]
+}
+class Question {
+  questionNumber
+  prompt
+  kind : single | group
+  mappingStatus
+}
+class Round {
+  roundId
+  questionNumber
+  phase : open | closed
+  openedAt
+  closedAt
+  nextOrder
+  blankCount
+  winnerGroupId
+}
+class Submission {
+  groupId
+  answers[]
+  acceptedOrder
+}
+class OpenRoundsInput {
+  questionNumbers[]
+  legacy : boolean
+}
+class OpenRoundsResult {
+  rounds : OpenedRound[]
+  stateVersion
+}
+class CloseRoundsResult {
+  rounds : ClosedRound[]
+  stateVersion
+}
+class ActivitySnapshot {
+  activityId
+  phase
+  stateVersion
+  rounds : ActivityRoundSnapshot[]
+}
+class ActivityRoundSnapshot {
+  roundId
+  questionNumber
+  prompt
+  kind
+  blanks[]
+  phase
+  openedAt
+  closedAt
+  winnerGroupId
+  submissions[]
+  writebackJob?
+}
+class TeacherActivityView {
+  joinCode
+  groupNames[]
+  questions[]
+  rounds : ActivityRoundSnapshot[]
+}
+class RoundState <<pure functions>> {
+  applyRoundOpened()
+  applySubmission()
+  applyRoundClosed()
+  applyWritebackStatus()
+  questionStatus()
+  formatElapsed()
+}
+enum QuestionStatus {
+  unconfirmed
+  idle
+  open
+  closed
+  writeback-pending
+  writeback-succeeded
+  writeback-failed
+}
+
+ActivityRecord "1" *-- "1..*" Question
+ActivityRecord "1" o-- "0..*" Round : open rounds (0..*) + closed rounds
+Question "1" --> "0..1" Round : opened at most once
+Round "1" *-- "0..*" Submission : independent order / winner
+OpenRoundsInput ..> OpenRoundsResult : open-rounds.lua (all or nothing)
+CloseRoundsResult ..> Round : close-rounds.lua (one or all open)
+ActivitySnapshot "1" *-- "0..*" ActivityRoundSnapshot
+TeacherActivityView "1" *-- "0..*" ActivityRoundSnapshot
+RoundState ..> ActivityRoundSnapshot : upsert by roundId
+RoundState ..> QuestionStatus : derives card status
+
+note right of ActivityRecord
+  Replaces currentRoundId (single round).
+  A submission is accepted only when
+  openRoundIdsByQuestion[round.questionNumber] == roundId.
+end note
+@enduml
