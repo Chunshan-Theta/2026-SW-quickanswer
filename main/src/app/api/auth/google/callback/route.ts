@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { googleOAuthClient, OAUTH_COOKIE, verifyOAuthState } from "@/server/auth/google-oauth";
 import { saveGoogleTokens } from "@/server/auth/google-token-store";
-import { setSessionCookie, signSession } from "@/server/auth/session";
+import { setTeacherSessionCookie, signSession } from "@/server/auth/session";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     if (!teacherId) throw new Error("Missing Google subject");
     await saveGoogleTokens(teacherId, tokens);
     const response = NextResponse.redirect(new URL("/teacher/import", process.env.APP_BASE_URL ?? url.origin));
-    setSessionCookie(response, signSession({ sub: teacherId, role: "teacher" }));
+    setTeacherSessionCookie(response, signSession({ sub: teacherId, role: "teacher" }));
     response.cookies.set(OAUTH_COOKIE, "", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/api/auth/google", maxAge: 0 });
     return response;
   } catch {

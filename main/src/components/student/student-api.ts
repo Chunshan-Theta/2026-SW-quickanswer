@@ -1,22 +1,25 @@
 import type { ActivitySubmissionSnapshot } from "@/features/activities/domain/snapshot";
+import { seatHeaders, withSeat } from "@/lib/session/seat";
 
 /**
  * Every student request URL in one place: the live event stream and answer submission.
- * Session/identity details (cookies, per-tab identifiers) belong here, not in components.
+ * Each request names the tab's seat so the server uses this tab's own group identity
+ * (see `src/lib/session/seat.ts`).
  */
 
-export function studentEventsUrl(activityId: string): string {
-  return `/api/activities/${activityId}/events`;
+/** EventSource cannot set headers, so the stream carries the seat as `?seat=`. */
+export function studentEventsUrl(activityId: string, seat: string): string {
+  return withSeat(`/api/activities/${activityId}/events`, seat);
 }
 
 /**
  * Submits one answer per blank for a single round and returns the group's own receipt;
  * throws with the server's message on failure.
  */
-export async function submitStudentAnswers(activityId: string, roundId: string, answers: string[]): Promise<ActivitySubmissionSnapshot> {
+export async function submitStudentAnswers(activityId: string, seat: string, roundId: string, answers: string[]): Promise<ActivitySubmissionSnapshot> {
   const response = await fetch(`/api/activities/${activityId}/rounds/${roundId}/submissions`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...seatHeaders(seat) },
     body: JSON.stringify({ answers: answers.map((answer) => answer.trim()), requestId: crypto.randomUUID() }),
   });
   const body = await response.json().catch(() => ({})) as Partial<ActivitySubmissionSnapshot> & { error?: { message?: string } };

@@ -23,7 +23,7 @@ function questionLabel(round: ActivityRoundSnapshot): string {
   return `QUESTION ${round.questionNumber.padStart(2, "0")}${round.kind === "group" ? ` · 題組 ${roundBlanks(round).length} 小題` : ""}`;
 }
 
-export function StudentActivityRound({ activityId, groupId, initialSnapshot }: { activityId: string; groupId: string; initialSnapshot: Snapshot }) {
+export function StudentActivityRound({ activityId, groupId, seat, initialSnapshot }: { activityId: string; groupId: string; seat: string; initialSnapshot: Snapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [drafts, setDrafts] = useState<Record<string, string[]>>({});
   const [busyRounds, setBusyRounds] = useState<Record<string, boolean>>({});
@@ -31,7 +31,7 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const stream = new EventSource(studentEventsUrl(activityId));
+    const stream = new EventSource(studentEventsUrl(activityId, seat));
     stream.onopen = () => setConnected(true);
     stream.onerror = () => setConnected(false);
     stream.addEventListener("activity.snapshot", (message) => {
@@ -51,7 +51,7 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
       setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, rounds: applyRoundClosed(current.rounds, { ...event.data, closedAt: event.occurredAt }) }));
     });
     return () => stream.close();
-  }, [activityId]);
+  }, [activityId, seat]);
 
   function updateDraft(roundId: string, index: number, value: string) {
     setDrafts((current) => {
@@ -68,7 +68,7 @@ export function StudentActivityRound({ activityId, groupId, initialSnapshot }: {
     setErrors((current) => ({ ...current, [round.roundId]: "" }));
     try {
       const answers = roundBlanks(round).map((_, index) => drafts[round.roundId]?.[index] ?? "");
-      const receipt = await submitStudentAnswers(activityId, round.roundId, answers);
+      const receipt = await submitStudentAnswers(activityId, seat, round.roundId, answers);
       // Show the receipt immediately; the live receipt event carries the same data.
       setSnapshot((current) => ({ ...current, rounds: applySubmission(current.rounds, round.roundId, receipt) }));
       setDrafts((current) => {

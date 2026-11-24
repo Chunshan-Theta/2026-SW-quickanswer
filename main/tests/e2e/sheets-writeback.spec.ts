@@ -66,7 +66,7 @@ async function clearActivity(id: string, code: string) {
 
 async function addTeacherCookie(page: Page) {
   await page.context().addCookies([{
-    name: "classroom_session",
+    name: "qa_teacher",
     value: sessionCookie(),
     domain: "localhost",
     path: "/",
@@ -84,7 +84,7 @@ async function joinGroup(browser: Browser, code: string, group: string) {
   await page.getByLabel("選擇組別").selectOption(group);
   await page.getByLabel("顯示名稱").fill(`${group} Student`);
   await page.getByRole("button", { name: "加入組別" }).click();
-  await expect(page).toHaveURL(/\/student\/activity$/);
+  await expect(page).toHaveURL(/\/student\/activity\?seat=[A-Za-z0-9_-]{22}$/);
   return { context, page };
 }
 
@@ -140,7 +140,7 @@ test("teacher queues the winning answer writeback and sees its status", async ({
     Red: JSON.stringify({ groupId: "Red", answer: "Respiration", acceptedOrder: 2, acceptedAt: "t2" }),
   });
   await context.addCookies([{
-    name: "classroom_session",
+    name: "qa_teacher",
     value: sessionCookie(),
     domain: "localhost",
     path: "/",

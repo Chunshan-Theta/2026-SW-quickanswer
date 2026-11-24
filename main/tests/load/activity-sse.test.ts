@@ -31,7 +31,7 @@ describe("500-client SSE phase fanout", () => {
       stateVersion: 0,
       groupNames: ["Blue", "Red"],
     }), { EX: 60 });
-    const cookie = `classroom_session=${signSession({ sub: teacherId, role: "teacher" })}`;
+    const cookie = `qa_teacher=${signSession({ sub: teacherId, role: "teacher" })}`;
     const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
     try {
       for (let index = 0; index < 500; index += 1) {
