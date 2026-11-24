@@ -4,6 +4,8 @@ export const activityPhases = [
   "ready",
   "active",
   "completed",
+  /** Terminal: set only when the teacher closes the room (006). */
+  "ended",
 ] as const;
 
 export const roundPhases = ["ready", "open", "closed"] as const;

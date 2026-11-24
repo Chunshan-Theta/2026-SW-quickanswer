@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  closeActivity,
   closeAllOpenRounds,
   closeRound as closeRoundRecord,
   openRounds,
@@ -21,4 +22,9 @@ export function finishActivityRound(activityId: string, roundId: string, teacher
 
 export function finishAllOpenRounds(activityId: string, teacherId: string) {
   return closeAllOpenRounds(activityId, teacherId);
+}
+
+/** 關閉房間 (006): ends every open question and the activity; idempotent once ended. */
+export function closeActivityRoom(activityId: string, teacherId: string) {
+  return closeActivity(activityId, teacherId);
 }

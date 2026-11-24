@@ -37,6 +37,7 @@ export async function getTeacherActivity(activityId: string, session: SessionCla
     activityId,
     joinCode: activity.joinCode,
     phase: snapshot.phase,
+    endedAt: snapshot.endedAt ?? null,
     groupNames: activity.groupNames,
     completedQuestionNumbers: Array.isArray(activity.completedQuestionNumbers) ? activity.completedQuestionNumbers as string[] : [],
     questions: activity.questions.map((question) => ({

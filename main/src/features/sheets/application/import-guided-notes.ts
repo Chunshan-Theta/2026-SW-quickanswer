@@ -30,13 +30,21 @@ export type ImportedActivity = {
   spreadsheetId: string;
   sheetId: number;
   joinCode: string;
-  phase: "ready" | "mapping_review";
+  /** Rounds and close room move it on: active / completed / ended (terminal, 006). */
+  phase: "mapping_review" | "ready" | "active" | "completed" | "ended";
   layout: "table" | "marker";
   structureFingerprint: string;
   groupNames: string[];
   questions: ImportedQuestion[];
   completedQuestionNumbers?: string[];
   roundIdsByQuestion?: Record<string, string>;
+  /** ISO time of the import; also the score in the teacher's activity index (006). */
+  createdAt?: string;
+  /** Set when the teacher closes the room (006). */
+  endedAt?: string;
+  /** Google Picker file name and worksheet tab title, for 「我的課堂活動」 (006). */
+  spreadsheetTitle?: string;
+  sheetTitle?: string;
 };
 
 function questionStatus(blanks: ImportedBlank[]): MappingStatus {
@@ -91,6 +99,7 @@ export async function importGuidedNotes(teacherId: string, input: ActivityImport
   for (let attempt = 0; attempt < 8; attempt += 1) {
     joinCode = Array.from(randomBytes(6), (byte) => alphabet[byte % alphabet.length]).join("");
     const activityId = randomUUID();
+    const createdAt = new Date();
     activity = {
       activityId,
       teacherId,
@@ -102,11 +111,21 @@ export async function importGuidedNotes(teacherId: string, input: ActivityImport
       structureFingerprint: structureFingerprint(parsed),
       groupNames: input.groupNames,
       questions,
+      createdAt: createdAt.toISOString(),
+      sheetTitle: grid.title,
+      ...(input.spreadsheetTitle ? { spreadsheetTitle: input.spreadsheetTitle } : {}),
     };
     const reserved = await redis.set(redisKeys.joinCode(joinCode), activityId, { EX: ttl, NX: true });
     if (!reserved) continue;
     try {
-      await redis.set(redisKeys.activity(activityId), JSON.stringify(activity), { EX: ttl });
+      // The activity and its entry in the teacher's 「我的課堂活動」 index are written together, so a
+      // created activity is always listed; the index expires with the newest activity (006).
+      const teacherIndex = redisKeys.teacherActivities(teacherId);
+      await redis.multi()
+        .set(redisKeys.activity(activityId), JSON.stringify(activity), { EX: ttl })
+        .zAdd(teacherIndex, { score: createdAt.getTime(), value: activityId })
+        .expire(teacherIndex, ttl)
+        .exec();
       return publicActivity(activity);
     } catch (error) {
       await redis.del(redisKeys.joinCode(joinCode));

@@ -2,12 +2,19 @@
 -- KEYS[1] activity meta, KEYS[2] activity event stream, then four keys per round i:
 --   KEYS[3 + 4(i-1)] state hash, +1 submissions hash, +2 order zset, +3 winner key
 -- ARGV[1] teacher id, ARGV[2] closedAt, ARGV[3] TTL seconds,
--- ARGV[4] mode: "strict" (every round must be open) | "open-only" (skip rounds already closed),
+-- ARGV[4] mode: "strict" (every round must be open) | "open-only" (skip rounds already closed)
+--   | "end-activity" (006 關閉房間: like open-only, zero rounds allowed, every open round of the
+--     activity must be among the keys, then the activity becomes "ended"),
 -- ARGV[5..] round ids in the same order as the keys
 local activityRaw = redis.call("GET", KEYS[1])
 if not activityRaw then return cjson.encode({ error = "NOT_FOUND" }) end
 local activity = cjson.decode(activityRaw)
 if activity.teacherId ~= ARGV[1] then return cjson.encode({ error = "FORBIDDEN" }) end
+local endActivity = ARGV[4] == "end-activity"
+if endActivity and activity.phase == "ended" then
+  -- Closing a closed room changes nothing.
+  return '{"rounds":[],"phase":"ended","endedAt":' .. cjson.encode(activity.endedAt or cjson.null) .. ',"stateVersion":' .. (activity.stateVersion or 0) .. ',"alreadyEnded":true}'
+end
 
 local openRounds = activity.openRoundIdsByQuestion
 if type(openRounds) ~= "table" then openRounds = {} end
@@ -24,7 +31,17 @@ for index = 1, #ARGV - 4 do
     return cjson.encode({ error = "ROUND_CLOSED" })
   end
 end
-if #targets == 0 then return cjson.encode({ error = "NO_OPEN_ROUNDS" }) end
+if endActivity then
+  -- A question opened after the caller read the open set has no keys here: nothing is written
+  -- yet, so the caller re-reads and retries instead of leaving that question open.
+  local covered = {}
+  for _, target in ipairs(targets) do covered[target.questionNumber] = true end
+  for number in pairs(openRounds) do
+    if not covered[number] then return cjson.encode({ error = "STALE_OPEN_ROUNDS" }) end
+  end
+elseif #targets == 0 then
+  return cjson.encode({ error = "NO_OPEN_ROUNDS" })
+end
 
 local completed = {}
 if type(activity.completedQuestionNumbers) == "table" then
@@ -66,11 +83,23 @@ end
 local anyOpen = next(openRounds) ~= nil
 activity.openRoundIdsByQuestion = anyOpen and openRounds or nil
 activity.currentRoundId = nil
-activity.completedQuestionNumbers = completed
-activity.phase = (not anyOpen and #completed >= #(activity.questions or {})) and "completed" or "active"
+-- cjson would store an empty table as {}; keep the field absent until a question is completed.
+activity.completedQuestionNumbers = #completed > 0 and completed or nil
+if endActivity then
+  activity.phase = "ended"
+  activity.endedAt = ARGV[2]
+  activity.stateVersion = (activity.stateVersion or 0) + 1
+  local ended = cjson.encode({ type = "activity.ended", activityId = activity.activityId, stateVersion = activity.stateVersion, occurredAt = ARGV[2], data = { phase = "ended", endedAt = ARGV[2] } })
+  table.insert(events, { version = activity.stateVersion, payload = ended })
+else
+  activity.phase = (not anyOpen and #completed >= #(activity.questions or {})) and "completed" or "active"
+end
 redis.call("SET", KEYS[1], cjson.encode(activity), "KEEPTTL")
 for _, event in ipairs(events) do
   redis.call("XADD", KEYS[2], "MAXLEN", "~", "1000", "*", "stateVersion", tostring(event.version), "payload", event.payload)
 end
 redis.call("EXPIRE", KEYS[2], tonumber(ARGV[3]))
+if endActivity then
+  return '{"rounds":[' .. table.concat(results, ",") .. '],"phase":"ended","endedAt":' .. cjson.encode(ARGV[2]) .. ',"stateVersion":' .. activity.stateVersion .. ',"alreadyEnded":false}'
+end
 return '{"rounds":[' .. table.concat(results, ",") .. '],"stateVersion":' .. activity.stateVersion .. '}'

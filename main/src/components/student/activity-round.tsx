@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Check, RadioTower } from "lucide-react";
+import { Check, DoorClosed, RadioTower } from "lucide-react";
 import { StudentAnswerForm } from "@/components/student/answer-form";
 import { studentEventsUrl, submitStudentAnswers } from "@/components/student/student-api";
 import { SubmissionAnswer } from "@/components/shared/submission-answer";
@@ -50,6 +50,11 @@ export function StudentActivityRound({ activityId, groupId, seat, initialSnapsho
       const event = readEvent<RoundClosedData>(message);
       setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, rounds: applyRoundClosed(current.rounds, { ...event.data, closedAt: event.occurredAt }) }));
     });
+    // The teacher closed the room (006): no more questions; published results stay visible.
+    stream.addEventListener("activity.ended", (message) => {
+      const event = readEvent<{ phase: "ended"; endedAt: string }>(message);
+      setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, phase: "ended", endedAt: event.data.endedAt }));
+    });
     return () => stream.close();
   }, [activityId, seat]);
 
@@ -85,13 +90,20 @@ export function StudentActivityRound({ activityId, groupId, seat, initialSnapsho
 
   const openRounds = snapshot.rounds.filter((round) => round.phase === "open");
   const closedRounds = snapshot.rounds.filter((round) => round.phase === "closed");
+  const ended = snapshot.phase === "ended";
 
   return (
     <section className="student-round" aria-live="polite">
       <div className="student-round-status">
-        <span className={`phase-pill ${openRounds.length ? "phase-live" : "phase-waiting"}`}><i />{openRounds.length ? `${openRounds.length} 題搶答進行中` : "等待老師開題"}</span>
+        <span className={`phase-pill ${ended ? "phase-ended" : openRounds.length ? "phase-live" : "phase-waiting"}`}><i />{ended ? "活動已結束" : openRounds.length ? `${openRounds.length} 題搶答進行中` : "等待老師開題"}</span>
         <span className="connection"><i className={connected ? "" : "connection-idle"} />{connected ? "即時連線" : "連線中斷"}</span>
       </div>
+      {ended && (
+        <div className="activity-ended-banner" role="status">
+          <DoorClosed aria-hidden="true" size={20} />
+          <div><strong>活動已結束</strong><span>老師已關閉房間，無法再作答。{closedRounds.length ? "以下為已公布的結果。" : ""}</span></div>
+        </div>
+      )}
 
       {openRounds.length > 0 ? (
         <ol className="student-round-list" aria-label="開放中的題目">
@@ -122,7 +134,7 @@ export function StudentActivityRound({ activityId, groupId, seat, initialSnapsho
           })}
         </ol>
       ) : (
-        <div className="student-waiting"><RadioTower size={22} /><p>{closedRounds.length ? "目前沒有開放中的題目" : "老師尚未開啟題目"}</p><small>老師開放題目後會自動顯示，可能一次開放多題。</small></div>
+        !ended && <div className="student-waiting"><RadioTower size={22} /><p>{closedRounds.length ? "目前沒有開放中的題目" : "老師尚未開啟題目"}</p><small>老師開放題目後會自動顯示，可能一次開放多題。</small></div>
       )}
 
       {closedRounds.length > 0 && (
