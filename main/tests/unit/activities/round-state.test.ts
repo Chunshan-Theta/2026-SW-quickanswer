@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActivityRoundSnapshot } from "@/features/activities/domain/snapshot";
 import {
+  applyPublishedAnswer,
   applyRoundClosed,
   applyRoundOpened,
   applySubmission,
@@ -130,3 +131,29 @@ describe("formatElapsed", () => {
     expect(formatElapsed("not a date", at(5))).toBe("00:00");
   });
 });
+
+describe("adopted and published answers (005)", () => {
+  const published = { source: "group" as const, groupId: "B", answer: "B answer", answers: ["B answer"], publishedAt: "t9" };
+
+  it("publishes an answer on one round only", () => {
+    const rounds = [round("1", { phase: "closed" }), round("2", { phase: "closed" })];
+    const next = applyPublishedAnswer(rounds, "round-2", published);
+    expect(next[1].publishedAnswer).toEqual(published);
+    expect(next[0]).toBe(rounds[0]);
+    expect(applyPublishedAnswer(rounds, "missing", published)).toBe(rounds);
+  });
+
+  it("keeps the adopted answer across status updates and publishes it on success", () => {
+    const adopted = { source: "group" as const, groupId: "B", answer: "B answer", answers: ["B answer"] };
+    let rounds = [round("1", { phase: "closed" })];
+    rounds = applyWritebackStatus(rounds, "round-1", { jobId: "j", status: "queued", attempt: 0, adopted });
+    rounds = applyWritebackStatus(rounds, "round-1", { jobId: "j", status: "running", attempt: 1 });
+    expect(rounds[0].writebackJob).toMatchObject({ status: "running", adopted });
+    expect(rounds[0].publishedAnswer).toBeUndefined();
+
+    rounds = applyWritebackStatus(rounds, "round-1", { jobId: "j", status: "succeeded", attempt: 1, published });
+    expect(rounds[0].writebackJob).toMatchObject({ status: "succeeded", adopted });
+    expect(rounds[0].publishedAnswer).toEqual(published);
+  });
+});
+

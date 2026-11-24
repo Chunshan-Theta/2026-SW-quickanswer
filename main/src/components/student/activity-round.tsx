@@ -5,8 +5,8 @@ import { Check, RadioTower } from "lucide-react";
 import { StudentAnswerForm } from "@/components/student/answer-form";
 import { studentEventsUrl, submitStudentAnswers } from "@/components/student/student-api";
 import { SubmissionAnswer } from "@/components/shared/submission-answer";
-import { applyRoundClosed, applyRoundOpened, applySubmission, type RoundClosedData, type RoundOpenedData } from "@/features/activities/domain/round-state";
-import type { ActivityRoundSnapshot, ActivitySnapshot, ActivitySubmissionSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
+import { applyPublishedAnswer, applyRoundClosed, applyRoundOpened, applySubmission, type RoundClosedData, type RoundOpenedData } from "@/features/activities/domain/round-state";
+import type { ActivityRoundSnapshot, ActivitySnapshot, ActivitySubmissionSnapshot, PublishedAnswerSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
 
 export type Snapshot = ActivitySnapshot;
 type LiveEvent<T> = { stateVersion: number; occurredAt?: string; data: T };
@@ -17,6 +17,15 @@ function readEvent<T>(message: Event): LiveEvent<T> {
 
 function roundBlanks(round: ActivityRoundSnapshot): RoundBlankSnapshot[] {
   return round.blanks?.length ? round.blanks : [{ label: null, prompt: round.prompt }];
+}
+
+/** Renders the published answer with the same per-blank layout as a group's answer. */
+function publishedAsSubmission(published: PublishedAnswerSnapshot): ActivitySubmissionSnapshot {
+  return { groupId: published.groupId ?? "", answer: published.answer, answers: published.answers, acceptedOrder: 0, acceptedAt: "" };
+}
+
+function publishedLabel(published: PublishedAnswerSnapshot): string {
+  return published.source === "group" && published.groupId ? `正確答案（老師採用：${published.groupId}）` : "正確答案（老師提供）";
 }
 
 function questionLabel(round: ActivityRoundSnapshot): string {
@@ -49,6 +58,11 @@ export function StudentActivityRound({ activityId, groupId, seat, initialSnapsho
     stream.addEventListener("results.finalized", (message) => {
       const event = readEvent<RoundClosedData>(message);
       setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, rounds: applyRoundClosed(current.rounds, { ...event.data, closedAt: event.occurredAt }) }));
+    });
+    // 005: the answer the teacher adopted, sent once its writeback succeeded.
+    stream.addEventListener("answer.published", (message) => {
+      const event = readEvent<{ roundId: string; published: PublishedAnswerSnapshot }>(message);
+      setSnapshot((current) => ({ ...current, stateVersion: event.stateVersion, rounds: applyPublishedAnswer(current.rounds, event.data.roundId, event.data.published) }));
     });
     return () => stream.close();
   }, [activityId, seat]);
@@ -127,27 +141,33 @@ export function StudentActivityRound({ activityId, groupId, seat, initialSnapsho
 
       {closedRounds.length > 0 && (
         <section className="student-results" aria-labelledby="student-results-heading">
-          <div className="section-heading"><h2 id="student-results-heading">已公布結果</h2><span>{closedRounds.length} 題</span></div>
+          <div className="section-heading"><h2 id="student-results-heading">已結束的題目</h2><span>{closedRounds.length} 題</span></div>
           <ol className="student-round-list">
-            {closedRounds.map((round) => (
-              <li className="final-result" key={round.roundId}>
-                <div className="section-heading">
-                  <h3>第 {round.questionNumber} 題最終結果</h3>
-                  <span>{round.winnerGroupId ? `最快：${round.winnerGroupId}` : "本題無人作答"}</span>
-                </div>
-                <p className="final-result-prompt">{round.prompt}</p>
-                <ol className="result-list">
-                  {round.submissions.map((submission) => (
-                    <li key={submission.groupId}>
-                      <span>{submission.acceptedOrder.toString().padStart(2, "0")}</span>
-                      <strong>{submission.groupId}</strong>
-                      <SubmissionAnswer submission={submission} blanks={round.blanks} />
-                      {submission.groupId === round.winnerGroupId && <Check size={16} aria-label="搶答成功" />}
-                    </li>
-                  ))}
-                </ol>
-              </li>
-            ))}
+            {closedRounds.map((round) => {
+              // 005: a student sees only their own group's answer and, once published, the teacher's.
+              const own = round.submissions.find((submission) => submission.groupId === groupId);
+              const published = round.publishedAnswer;
+              const ownAdopted = published?.source === "group" && published.groupId === groupId;
+              return (
+                <li className="final-result" key={round.roundId}>
+                  <div className="section-heading">
+                    <h3>第 {round.questionNumber} 題</h3>
+                    <span>{published ? "已公布正確答案" : "等待公布"}</span>
+                  </div>
+                  <p className="final-result-prompt">{round.prompt}</p>
+                  <div className="answer-compare">
+                    <section className={`answer-compare-item${ownAdopted ? " answer-compare-adopted" : ""}`} aria-label={`第 ${round.questionNumber} 題你們的答案`}>
+                      <p className="answer-compare-label">你們的答案{own ? ` · 第 ${own.acceptedOrder} 個送出` : ""}{ownAdopted && <span className="answer-compare-tag"><Check size={13} />老師採用</span>}</p>
+                      {own ? <SubmissionAnswer submission={own} blanks={round.blanks} /> : <p className="answer-compare-empty">你們沒有在本題作答</p>}
+                    </section>
+                    <section className="answer-compare-item answer-compare-correct" aria-label={`第 ${round.questionNumber} 題正確答案`}>
+                      <p className="answer-compare-label">{published ? publishedLabel(published) : "正確答案"}</p>
+                      {published ? <SubmissionAnswer submission={publishedAsSubmission(published)} blanks={round.blanks} /> : <p className="answer-compare-empty">等待老師公布正確答案</p>}
+                    </section>
+                  </div>
+                </li>
+              );
+            })}
           </ol>
         </section>
       )}

@@ -1,6 +1,6 @@
 import "server-only";
 import type { SessionClaims } from "@/features/activities/domain/types";
-import { parseRoundBlanks } from "@/features/activities/domain/snapshot";
+import { parsePublishedAnswer, parseRoundBlanks } from "@/features/activities/domain/snapshot";
 import { errorCodes } from "@/lib/errors/error-codes";
 import { AppError } from "@/server/http/errors";
 import { getRedisClient } from "@/server/redis/client";
@@ -47,9 +47,11 @@ export async function getRoundResults(activityId: string, roundId: string, sessi
   const submissions = Object.values(entries)
     .map((value) => JSON.parse(value) as SubmissionRecord)
     .sort((left, right) => left.acceptedOrder - right.acceptedOrder);
-  const visibleSubmissions = session.role === "teacher" || round.phase === "closed"
-    ? submissions
-    : submissions.filter((submission) => submission.groupId === session.groupId);
+  // Students only ever see their own group's answer and, after a successful writeback, the
+  // answer the teacher adopted; never the other groups or the fastest group (005).
+  const isTeacher = session.role === "teacher";
+  const visibleSubmissions = isTeacher ? submissions : submissions.filter((submission) => submission.groupId === session.groupId);
+  const publishedAnswer = parsePublishedAnswer(round);
 
   return {
     roundId,
@@ -57,7 +59,8 @@ export async function getRoundResults(activityId: string, roundId: string, sessi
     questionNumber: round.questionNumber,
     kind: round.kind === "group" ? "group" : "single",
     blanks: parseRoundBlanks(round.blanks, round.prompt ?? ""),
-    winnerGroupId: round.phase === "closed" ? round.winnerGroupId || null : null,
+    winnerGroupId: isTeacher && round.phase === "closed" ? round.winnerGroupId || null : null,
     submissions: visibleSubmissions,
+    ...(publishedAnswer ? { publishedAnswer } : {}),
   };
 }
