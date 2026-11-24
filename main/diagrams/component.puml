@@ -19,7 +19,7 @@ package "Next.js App (Node.js runtime)" {
 database "Private Redis\n(server-only)" as ActivityData
 cloud "Original Guided Notes Sheet" as GuidedNotes
 
-Teacher --> TeacherClient : Import, control, review
+Teacher --> TeacherClient : Import, control, adopt answers, close room, 我的課堂活動
 Student --> StudentClient : Join group, submit
 TeacherClient --> AppAPI : HTTPS actions
 StudentClient --> AppAPI : HTTPS join / submit (x-quickanswer-seat → qa_seat_<seat> cookie)
@@ -31,7 +31,7 @@ ActivitySync --> ActivityData : Per-instance Stream reader
 WritebackWorker --> ActivityData : Read / ack retryable jobs
 SheetsAccess <--> GuidedNotes : Dynamic question/slot lookup and write
 ActivitySync --> TeacherClient : Authorized live status / results
-ActivitySync --> StudentClient : Phase / own receipt / post-close results
+ActivitySync --> StudentClient : Phase / own receipt / own result + adopted answer / activity ended
 
 note bottom of ActivityData
 	No browser connection to Redis.
