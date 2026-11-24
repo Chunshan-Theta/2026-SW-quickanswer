@@ -23,8 +23,61 @@ describe("projectActivityEvent", () => {
     expect(projectActivityEvent(ownEvent, blue)?.data).not.toHaveProperty("winnerGroupId");
   });
 
-  it("only publishes finalized group results to students after close", () => {
-    const finalized = { ...event, type: "results.finalized", data: { phase: "closed", submissions: [{ groupId: "Red", answer: "answer" }] } };
-    expect(projectActivityEvent(finalized, blue)).toEqual(finalized);
+  describe("after a question closes (005)", () => {
+    const finalized = {
+      ...event,
+      type: "results.finalized",
+      data: {
+        roundId: "round-1",
+        questionNumber: "1",
+        phase: "closed",
+        winnerGroupId: "Red",
+        submissions: [
+          { groupId: "Red", answer: "red answer", acceptedOrder: 1, acceptedAt: "t1" },
+          { groupId: "Blue", answer: "blue answer", acceptedOrder: 2, acceptedAt: "t2" },
+        ],
+      },
+    };
+
+    it("sends a student only their own submission and never the fastest group", () => {
+      expect(projectActivityEvent(finalized, teacher)).toEqual(finalized);
+      const projected = projectActivityEvent(finalized, blue);
+      expect(projected).toMatchObject({ type: "results.finalized", stateVersion: 4 });
+      expect(projected?.data).toEqual({
+        roundId: "round-1",
+        questionNumber: "1",
+        phase: "closed",
+        winnerGroupId: null,
+        submissions: [{ groupId: "Blue", answer: "blue answer", acceptedOrder: 2, acceptedAt: "t2" }],
+      });
+      expect(JSON.stringify(projected)).not.toContain("Red");
+      expect(JSON.stringify(projected)).not.toContain("red answer");
+    });
+
+    it("gives a student who did not answer an empty list", () => {
+      const green = { ...blue, groupId: "Green" };
+      expect(projectActivityEvent(finalized, green)?.data).toMatchObject({ winnerGroupId: null, submissions: [] });
+    });
+
+    it("publishes the adopted answer to students only when its writeback succeeded", () => {
+      const status = (data: Record<string, unknown>) => ({ ...event, type: "writeback.status", stateVersion: 9, data: { jobId: "activity-1:round-1", roundId: "round-1", questionNumber: "1", attempt: 1, errorCode: null, ...data } });
+      const adopted = { source: "group", groupId: "Red", answer: "red answer", answers: ["red answer"] };
+      const queued = status({ status: "queued", adopted });
+      const failed = status({ status: "failed", errorCode: "CONFLICT" });
+      const succeeded = status({ status: "succeeded", published: { ...adopted, publishedAt: "t9" } });
+
+      expect(projectActivityEvent(queued, teacher)).toEqual(queued);
+      expect(projectActivityEvent(queued, blue)).toBeNull();
+      expect(projectActivityEvent(failed, blue)).toBeNull();
+      expect(projectActivityEvent(status({ status: "succeeded" }), blue)).toBeNull();
+      expect(projectActivityEvent(succeeded, teacher)).toEqual(succeeded);
+      expect(projectActivityEvent(succeeded, blue)).toEqual({
+        activityId: "activity-1",
+        stateVersion: 9,
+        type: "answer.published",
+        occurredAt: event.occurredAt,
+        data: { roundId: "round-1", questionNumber: "1", published: { ...adopted, publishedAt: "t9" } },
+      });
+    });
   });
 });

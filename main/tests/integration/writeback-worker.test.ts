@@ -20,7 +20,7 @@ vi.mock("@/features/sheets/application/writeback-guided-notes", () => ({
   applyGuidedNotesWriteback: mocks.applyGuidedNotesWriteback,
 }));
 
-import { jobAnswers, processWritebackEntry, runSheetsWritebackWorker } from "@/server/workers/sheets-writeback";
+import { jobAnswers, jobPreviousAnswers, processWritebackEntry, runSheetsWritebackWorker } from "@/server/workers/sheets-writeback";
 
 const job = {
   jobId: "activity-1:round-1",
@@ -80,9 +80,20 @@ describe("writeback worker recovery", () => {
     mocks.prepareGuidedNotesWriteback.mockResolvedValue(prepared);
 
     await expect(processWritebackEntry(redis, job.jobId)).resolves.toBe(true);
-    expect(mocks.prepareGuidedNotesWriteback).toHaveBeenCalledWith({}, "1", ["CPU", "OS"]);
+    expect(mocks.prepareGuidedNotesWriteback).toHaveBeenCalledWith({}, "1", ["CPU", "OS"], []);
     expect(mocks.applyGuidedNotesWriteback).toHaveBeenCalledWith({}, prepared);
     expect(mocks.updateWritebackStatus).toHaveBeenLastCalledWith(redis, groupJob, "succeeded", 1);
+  });
+
+  it("passes the previously published answers so a re-selected answer can replace them (005)", async () => {
+    const reselected = { ...job, answers: JSON.stringify(["right"]), previousAnswers: JSON.stringify(["wrong"]) };
+    mocks.readWritebackJob.mockResolvedValue(reselected);
+    mocks.prepareGuidedNotesWriteback.mockResolvedValue({ alreadyWritten: true, targets: [] });
+
+    await expect(processWritebackEntry(redis, job.jobId)).resolves.toBe(true);
+    expect(mocks.prepareGuidedNotesWriteback).toHaveBeenCalledWith({}, "1", ["right"], ["wrong"]);
+    expect(jobPreviousAnswers({ previousAnswers: "" })).toEqual([]);
+    expect(jobPreviousAnswers({})).toEqual([]);
   });
 
   it("falls back to the single answer for jobs queued before question groups", () => {

@@ -272,6 +272,32 @@ label.question-card-select { cursor: pointer; }
 .student-results > .section-heading { margin-bottom: 0; }
 .final-result-prompt { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* 005: choosing the answer to write back (teacher) and the published answer (student). */
+.adopt-answer { display: grid; gap: 10px; }
+.adopt-answer-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.adopt-answer-fieldset legend { margin-bottom: 8px; padding: 0; color: var(--ink); font-size: 12px; font-weight: 700; }
+.adopt-answer-list { margin: 0; padding: 0; display: grid; gap: 6px; list-style: none; }
+.adopt-option { min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 4px 10px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--white); }
+.adopt-option-selected { border-color: var(--green); box-shadow: inset 3px 0 0 var(--green); }
+.adopt-option > input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--green); cursor: pointer; }
+.adopt-option > label { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12px; cursor: pointer; }
+.adopt-option > label strong { overflow-wrap: anywhere; }
+.adopt-option-order { color: var(--green); font: 11px "DM Mono", monospace; }
+.adopt-option-tag { padding: 2px 7px; border-radius: 999px; background: var(--mint); color: var(--green-dark); font-size: 10px; font-weight: 700; }
+.adopt-option-tag-published { background: var(--green); color: #fff; }
+.adopt-option-answer, .adopt-typed { grid-column: 2; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.adopt-option-answer p { margin: 0; color: var(--muted); white-space: pre-wrap; }
+.adopt-typed { display: grid; gap: 8px; margin-top: 4px; }
+.adopt-typed textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid #d5dfd9; border-radius: 5px; font: inherit; resize: vertical; }
+.answer-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.answer-compare-item { min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); font-size: 12px; overflow-wrap: anywhere; }
+.answer-compare-item > p:not(.answer-compare-label) { margin: 0; white-space: pre-wrap; }
+.answer-compare-correct { border-color: #cde7db; background: #f0faf5; }
+.answer-compare-adopted { border-color: var(--green); }
+.answer-compare-label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; color: var(--green-dark); font-size: 11px; font-weight: 700; }
+.answer-compare-tag { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; background: var(--green); color: #fff; font-size: 10px; }
+.answer-compare-empty { color: var(--muted); }
+
 @media (max-width: 700px) {
   .workspace { grid-template-columns: 1fr; padding-bottom: 64px; }
   .rail { position: fixed; z-index: 20; inset: auto 0 0; width: 100%; height: 60px; flex-direction: row; justify-content: center; gap: 18px; padding: 0 16px; border-top: 1px solid rgb(255 255 255 / 12%); }
@@ -308,6 +334,7 @@ label.question-card-select { cursor: pointer; }
   .question-card { padding: 14px; }
   .question-card-body { padding-left: 0; }
   .live-ranking, .closed-summary { margin-left: 0; padding: 10px; }
+  .answer-compare { grid-template-columns: minmax(0, 1fr); }
   .live-ranking-row { grid-template-columns: 26px minmax(0, 1fr); gap: 4px 8px; }
   .live-ranking-row > :nth-child(3) { grid-column: 2; }
   .join-code-panel { align-items: stretch; flex-direction: column; }

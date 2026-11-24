@@ -56,9 +56,21 @@ export const roundOpenSchema = z
     ? { questionNumbers: value.questionNumbers, legacy: false }
     : { questionNumbers: [value.questionNumber], legacy: true });
 
+/**
+ * The answer to write back (005): one group's answer or one typed by the teacher per blank.
+ * Without a selection the fastest group's answer is written (001–004 behaviour).
+ */
+export const adoptionSelectionSchema = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("group"), groupId: z.string().trim().min(1).max(64) }),
+  z.object({ source: z.literal("teacher"), answers: z.array(submittedAnswer).min(1).max(20) }),
+]);
+
 export const writebackRequestSchema = z.object({
   requestId: z.string().uuid(),
+  selection: adoptionSelectionSchema.optional(),
 });
+
+export type WritebackSelectionInput = z.infer<typeof adoptionSelectionSchema>;
 
 export type ActivityImportInput = z.infer<typeof activityImportSchema>;
 export type MappingConfirmationInput = z.infer<typeof mappingConfirmationSchema>;

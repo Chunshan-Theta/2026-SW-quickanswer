@@ -25,6 +25,8 @@ export async function prepareGuidedNotesWriteback(
   activity: ImportedActivity,
   questionNumber: string,
   answers: string[],
+  /** 005: answers the last successful writeback left in the cells (re-selection may replace them). */
+  previousAnswers: string[] = [],
 ): Promise<PreparedWriteback> {
   const grid = await readWorksheet(activity.teacherId, activity.spreadsheetId, activity.sheetId);
   const parsed = parseWorksheetGrid(grid);
@@ -45,9 +47,12 @@ export async function prepareGuidedNotesWriteback(
     const candidate = blank.candidates.find((item) => item.token === blank.selectedToken);
     if (!candidate) throw new AppError(409, errorCodes.conflict, "題目答案空格尚未確認，未執行回填。");
     const value = `${blank.label ?? ""}${answers[index]}`;
-    // Marker layout: the marker is replaced by the answer, so accept either the marker or a finished write.
+    const previousValue = previousAnswers[index] === undefined ? undefined : `${blank.label ?? ""}${previousAnswers[index]}`;
+    // Marker layout: the marker is replaced by the answer, so accept the marker, a finished write,
+    // or the answer this app wrote last time (the teacher re-selected another answer).
     const stillResolvable = parsedQuestion?.blanks[index]?.candidateSlots.some((location) => sameLocation(location, candidate.location));
-    if (!stillResolvable && cellTextAt(grid, candidate.location) !== value) {
+    const current = cellTextAt(grid, candidate.location);
+    if (!stillResolvable && current !== value && current !== previousValue) {
       throw new AppError(409, errorCodes.conflict, "無法唯一確認題號對應的答案空格，未執行回填。");
     }
     return { location: candidate.location, value };

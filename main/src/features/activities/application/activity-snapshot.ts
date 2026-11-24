@@ -1,6 +1,13 @@
 import "server-only";
 import type { SessionClaims } from "@/features/activities/domain/types";
-import { parseRoundBlanks, type ActivityRoundSnapshot, type ActivitySnapshot, type ActivitySubmissionSnapshot } from "@/features/activities/domain/snapshot";
+import {
+  parseAdoptedAnswer,
+  parsePublishedAnswer,
+  parseRoundBlanks,
+  type ActivityRoundSnapshot,
+  type ActivitySnapshot,
+  type ActivitySubmissionSnapshot,
+} from "@/features/activities/domain/snapshot";
 import { sortRounds } from "@/features/activities/domain/round-state";
 import { AppError } from "@/server/http/errors";
 import { errorCodes } from "@/lib/errors/error-codes";
@@ -35,10 +42,10 @@ async function loadRound(activityId: string, roundId: string, session: SessionCl
   const allSubmissions = Object.values(entries)
     .map((value) => JSON.parse(value) as ActivitySubmissionSnapshot)
     .sort((left, right) => left.acceptedOrder - right.acceptedOrder);
-  // Students see other groups' answers only after that round has closed.
-  const visibleSubmissions = session.role === "teacher" || round.phase === "closed"
-    ? allSubmissions
-    : allSubmissions.filter((submission) => submission.groupId === session.groupId);
+  // Students only ever see their own group's answer, also after the round closed (005).
+  const isTeacher = session.role === "teacher";
+  const visibleSubmissions = isTeacher ? allSubmissions : allSubmissions.filter((submission) => submission.groupId === session.groupId);
+  const publishedAnswer = parsePublishedAnswer(round);
   const snapshot: ActivityRoundSnapshot = {
     roundId,
     questionNumber: round.questionNumber,
@@ -48,15 +55,17 @@ async function loadRound(activityId: string, roundId: string, session: SessionCl
     phase: round.phase,
     ...(round.openedAt ? { openedAt: round.openedAt } : {}),
     ...(round.closedAt ? { closedAt: round.closedAt } : {}),
-    winnerGroupId: round.winnerGroupId || null,
+    winnerGroupId: isTeacher ? round.winnerGroupId || null : null,
     submissions: visibleSubmissions,
+    ...(publishedAnswer ? { publishedAnswer } : {}),
   };
 
-  if (session.role === "teacher" && round.phase === "closed") {
+  if (isTeacher && round.phase === "closed") {
     const jobId = `${activityId}:${roundId}`;
     const job = await redis.hGetAll(redisKeys.writebackJob(jobId));
+    const adopted = parseAdoptedAnswer(job);
     if (job.jobId) {
-      snapshot.writebackJob = { jobId, status: job.status, attempt: Number(job.attempt) || 0, errorCode: job.errorCode || null };
+      snapshot.writebackJob = { jobId, status: job.status, attempt: Number(job.attempt) || 0, errorCode: job.errorCode || null, ...(adopted ? { adopted } : {}) };
     }
   }
   return snapshot;

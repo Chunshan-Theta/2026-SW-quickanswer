@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Clipboard, LoaderCircle, RadioTower, RotateCcw, Square, Upload } from "lucide-react";
+import { Check, Clipboard, LoaderCircle, RadioTower, Square } from "lucide-react";
 import { SubmissionAnswer } from "@/components/shared/submission-answer";
 import { CloseRoomControl, type ClosedActivityResult } from "@/components/teacher/close-room-control";
 import { isActivityEnded, phaseAfterRoundsClosed } from "@/features/activities/domain/activity-lifecycle";
+import { AnswerAdoptionPanel } from "@/components/teacher/answer-adoption";
+import type { AdoptionSelection } from "@/features/activities/domain/answer-adoption";
 import {
   applyRoundClosed,
   applyRoundOpened,
@@ -17,7 +19,7 @@ import {
   type RoundClosedData,
   type RoundOpenedData,
 } from "@/features/activities/domain/round-state";
-import type { ActivityRoundSnapshot, ActivitySnapshot, ActivitySubmissionSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
+import type { ActivityRoundSnapshot, ActivitySnapshot, ActivitySubmissionSnapshot, AdoptedAnswerSnapshot, PublishedAnswerSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
 
 type Question = { questionNumber: string; prompt: string; kind?: "single" | "group"; mappingStatus: string; blanks?: RoundBlankSnapshot[] };
 type ActivityView = {
@@ -31,7 +33,7 @@ type ActivityView = {
   rounds: ActivityRoundSnapshot[];
 };
 type LiveEvent<T> = { stateVersion: number; occurredAt?: string; data: T };
-type WritebackJobData = { jobId: string; roundId: string; status: string; attempt?: number; errorCode?: string | null };
+type WritebackJobData = { jobId: string; roundId: string; status: string; attempt?: number; errorCode?: string | null; adopted?: AdoptedAnswerSnapshot; published?: PublishedAnswerSnapshot };
 type ClosedRoundResult = RoundClosedData & { questionNumber: string };
 
 const statusLabels: Record<QuestionStatus, string> = {
@@ -177,8 +179,9 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
     applyClosed((await postJson<{ rounds: ClosedRoundResult[] }>(`/api/activities/${activity.activityId}/rounds/close-all`)).rounds);
   });
 
-  const queueWriteback = (round: ActivityRoundSnapshot) => run(`writeback:${round.roundId}`, async () => {
-    const job = await postJson<{ jobId: string; status: string; attempt?: number }>(`/api/activities/${activity.activityId}/rounds/${round.roundId}/writeback`, { requestId: crypto.randomUUID() });
+  // 005: writes back the answer the teacher adopted (a group's answer or a typed one).
+  const queueWriteback = (round: ActivityRoundSnapshot, selection: AdoptionSelection) => run(`writeback:${round.roundId}`, async () => {
+    const job = await postJson<{ jobId: string; status: string; attempt?: number; adopted?: AdoptedAnswerSnapshot }>(`/api/activities/${activity.activityId}/rounds/${round.roundId}/writeback`, { requestId: crypto.randomUUID(), selection });
     setActivity((current) => ({ ...current, rounds: applyWritebackStatus(current.rounds, round.roundId, job) }));
   });
 
@@ -292,32 +295,14 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
 
                 {round?.phase === "closed" && (
                   <div className="closed-summary">
-                    <p className="closed-summary-winner">{round.winnerGroupId ? `搶答成功：${round.winnerGroupId}` : "本題無人作答。"}</p>
-                    {round.submissions.length > 0 && (
-                      <ol className="result-list" aria-label={`第 ${question.questionNumber} 題最終結果`}>
-                        {round.submissions.map((submission) => (
-                          <li key={submission.groupId}>
-                            <span>{submission.acceptedOrder.toString().padStart(2, "0")}</span>
-                            <strong>{submission.groupId}</strong>
-                            <SubmissionAnswer submission={submission} blanks={round.blanks} />
-                            {submission.groupId === round.winnerGroupId && <Check size={16} aria-label="搶答成功" />}
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                    {round.winnerGroupId && (
-                      <div className="writeback-status">
-                        <button className="secondary-action" disabled={busy || (round.writebackJob !== undefined && round.writebackJob.status !== "failed")} type="button" onClick={() => queueWriteback(round)}>
-                          {pending === `writeback:${round.roundId}` ? spinner : round.writebackJob?.status === "failed" ? <RotateCcw size={15} /> : <Upload size={15} />}
-                          {!round.writebackJob ? "回填得獎答案" : round.writebackJob.status === "failed" ? "重新回填" : round.writebackJob.status === "succeeded" ? "已回填至工作表" : "回填處理中"}
-                        </button>
-                        {round.writebackJob && (
-                          <p className={`form-message ${round.writebackJob.status === "failed" ? "form-error" : "form-notice"}`} role="status">
-                            回填狀態：{round.writebackJob.status}{round.writebackJob.errorCode ? ` · ${round.writebackJob.errorCode}` : ""}
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    <p className="closed-summary-winner">{round.winnerGroupId ? `最快作答：${round.winnerGroupId}` : "本題無人作答，可自行輸入正確答案回填。"}</p>
+                    <AnswerAdoptionPanel
+                      key={round.roundId}
+                      round={round}
+                      busy={busy}
+                      submitting={pending === `writeback:${round.roundId}`}
+                      onWriteback={(selection) => queueWriteback(round, selection)}
+                    />
                   </div>
                 )}
               </li>
