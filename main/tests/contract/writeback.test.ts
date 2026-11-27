@@ -36,7 +36,38 @@ describe("writeback API", () => {
 
     expect(response.status).toBe(202);
     expect(await response.json()).toMatchObject({ status: "queued" });
-    expect(mocks.enqueueWriteback).toHaveBeenCalledWith("activity-1", "round-1", "teacher-1");
+    expect(mocks.enqueueWriteback).toHaveBeenCalledWith("activity-1", "round-1", "teacher-1", undefined);
+  });
+
+  it("passes the teacher's chosen group or typed answer to the queue (005)", async () => {
+    mocks.getRequestSession.mockReturnValue(teacher);
+    mocks.enqueueWriteback.mockResolvedValue({ jobId: "activity-1:round-1", status: "queued", existing: false, revision: 1 });
+    const requestId = "123e4567-e89b-42d3-a456-426614174000";
+
+    expect((await POST(request("POST", { requestId, selection: { source: "group", groupId: " teamB " } }), params)).status).toBe(202);
+    expect(mocks.enqueueWriteback).toHaveBeenLastCalledWith("activity-1", "round-1", "teacher-1", { source: "group", groupId: "teamB" });
+
+    expect((await POST(request("POST", { requestId, selection: { source: "teacher", answers: ["CPU", " OS "] } }), params)).status).toBe(202);
+    expect(mocks.enqueueWriteback).toHaveBeenLastCalledWith("activity-1", "round-1", "teacher-1", { source: "teacher", answers: ["CPU", "OS"] });
+  });
+
+  it("rejects an incomplete selection before it reaches the queue (005)", async () => {
+    mocks.getRequestSession.mockReturnValue(teacher);
+    const requestId = "123e4567-e89b-42d3-a456-426614174000";
+
+    for (const selection of [{ source: "teacher", answers: [] }, { source: "teacher", answers: ["CPU", " "] }, { source: "group", groupId: "" }]) {
+      expect((await POST(request("POST", { requestId, selection }), params)).status).toBe(422);
+    }
+    expect(mocks.enqueueWriteback).not.toHaveBeenCalled();
+  });
+
+  it("only lets the teacher choose the answer to write back (005)", async () => {
+    mocks.getRequestSession.mockReturnValue({ sub: "student-1", role: "student", activityId: "activity-1", groupId: "Blue", exp: 4_000_000_000 });
+
+    const response = await POST(request("POST", { requestId: "123e4567-e89b-42d3-a456-426614174000", selection: { source: "group", groupId: "Blue" } }), params);
+
+    expect(response.status).toBe(403);
+    expect(mocks.enqueueWriteback).not.toHaveBeenCalled();
   });
 
   it("rejects malformed queue requests", async () => {

@@ -1,0 +1,92 @@
+@startuml
+title Class Diagram - 005 Teacher-Selected Writeback Answer
+
+class AdoptionSelection <<union>> {
+  source : "group" | "teacher"
+  groupId : string  <<group>>
+  answers : string[]  <<teacher>>
+}
+
+class AdoptedAnswer {
+  source : "group" | "teacher"
+  groupId : string | null
+  answer : string
+  answers : string[]
+}
+
+class PublishedAnswerSnapshot {
+  source : "group" | "teacher"
+  groupId : string | null
+  answer : string
+  answers : string[]
+  publishedAt : string
+}
+
+class WritebackRequest {
+  requestId : uuid
+  selection : AdoptionSelection [0..1]
+}
+
+class WritebackJob {
+  jobId : string = activityId:roundId
+  roundId : string
+  questionNumber : string
+  winnerGroupId : string  <<fastest, unchanged>>
+  adoptedSource : "group" | "teacher"
+  adoptedGroupId : string
+  answer : string
+  answers : string[]  <<JSON>>
+  previousAnswers : string[]  <<JSON, last published>>
+  selectionKey : string
+  revision : int
+  status : queued | running | retryable | succeeded | failed
+}
+
+class RoundState {
+  phase : open | closed
+  winnerGroupId : string
+  publishedSource : string
+  publishedGroupId : string
+  publishedAnswers : string[]  <<JSON>>
+  publishedAnswer : string
+  publishedAt : string
+}
+
+class ActivityRoundSnapshot {
+  roundId : string
+  phase : string
+  winnerGroupId : string | null  <<null for students>>
+  submissions : ActivitySubmissionSnapshot[]  <<students: own only>>
+  publishedAnswer : PublishedAnswerSnapshot [0..1]
+  writebackJob : WritebackJobSnapshot [0..1]  <<teacher only>>
+}
+
+class WritebackJobSnapshot {
+  jobId : string
+  status : string
+  attempt : int
+  errorCode : string | null
+  adopted : AdoptedAnswer [0..1]
+}
+
+class AnswerAdoption <<pure helpers>> {
+  defaultAdoption(round) : AdoptionSelection | null
+  sameAdoption(selection, adopted) : boolean
+  describeAdoption(adopted) : string
+  adoptionIsComplete(selection, blankCount) : boolean
+}
+
+class ActivityEventProjection {
+  projectActivityEvent(event, session) : ActivityEvent | null
+}
+
+WritebackRequest --> AdoptionSelection
+WritebackJob ..> AdoptedAnswer : adopted*
+RoundState ..> PublishedAnswerSnapshot : published*
+ActivityRoundSnapshot --> PublishedAnswerSnapshot
+ActivityRoundSnapshot --> WritebackJobSnapshot
+WritebackJobSnapshot --> AdoptedAnswer
+AnswerAdoption ..> AdoptionSelection
+AnswerAdoption ..> AdoptedAnswer
+ActivityEventProjection ..> PublishedAnswerSnapshot : answer.published (students)
+@enduml

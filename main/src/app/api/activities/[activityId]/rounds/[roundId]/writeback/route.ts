@@ -14,7 +14,7 @@ export async function POST(request: Request, context: { params: Promise<{ activi
     const parsed = writebackRequestSchema.safeParse(body);
     if (!parsed.success) throw new AppError(422, errorCodes.invalidInput, "無效的回填請求。", parsed.error.flatten());
     const { activityId, roundId } = await context.params;
-    return jsonResponse(await enqueueWriteback(activityId, roundId, teacher.sub), id, 202);
+    return jsonResponse(await enqueueWriteback(activityId, roundId, teacher.sub, parsed.data.selection), id, 202);
   });
 }
 

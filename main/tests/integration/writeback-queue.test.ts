@@ -1,12 +1,19 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createClient, type RedisClientType } from "redis";
 import { enqueueWriteback } from "@/server/redis/writeback-queue";
 import { redisKeys } from "@/server/redis/keyspace";
 
-const activityId = "writeback-queue-test";
-const roundId = "writeback-round-test";
-const teacherId = "writeback-teacher-test";
+// Unique ids per test: the `writeback:jobs` stream is shared with other test runs and with a
+// locally running worker, so this suite only reads and removes its own entries.
+let activityId: string;
+let roundId: string;
+let teacherId: string;
 let redis: RedisClientType;
+
+async function queuedEntries(jobId: string) {
+  return ((await redis.xRange(redisKeys.writebackJobs, "-", "+")) ?? []).filter((entry) => entry.message.jobId === jobId);
+}
 
 describe("writeback queue", () => {
   beforeAll(async () => {
@@ -17,15 +24,9 @@ describe("writeback queue", () => {
   });
 
   beforeEach(async () => {
-    await redis.del([
-      redisKeys.activity(activityId),
-      redisKeys.round(roundId),
-      redisKeys.submissions(roundId),
-      redisKeys.writebackIdempotency(activityId, roundId),
-      redisKeys.writebackJob(`${activityId}:${roundId}`),
-      redisKeys.writebackJobs,
-      redisKeys.activityEvents(activityId),
-    ]);
+    activityId = `writeback-queue-${randomUUID()}`;
+    roundId = `writeback-round-${randomUUID()}`;
+    teacherId = `writeback-teacher-${randomUUID()}`;
     await redis.set(redisKeys.activity(activityId), JSON.stringify({
       activityId,
       teacherId,
@@ -43,6 +44,20 @@ describe("writeback queue", () => {
     });
   });
 
+  afterEach(async () => {
+    const jobId = `${activityId}:${roundId}`;
+    const entries = await queuedEntries(jobId);
+    if (entries.length) await redis.xDel(redisKeys.writebackJobs, entries.map((entry) => entry.id));
+    await redis.del([
+      redisKeys.activity(activityId),
+      redisKeys.round(roundId),
+      redisKeys.submissions(roundId),
+      redisKeys.writebackIdempotency(activityId, roundId),
+      redisKeys.writebackJob(jobId),
+      redisKeys.activityEvents(activityId),
+    ]);
+  });
+
   afterAll(async () => { await redis?.quit(); });
 
   it("uses one idempotency key and creates one job for repeated requests", async () => {
@@ -51,7 +66,7 @@ describe("writeback queue", () => {
 
     expect(first).toMatchObject({ jobId: `${activityId}:${roundId}`, status: "queued", existing: false });
     expect(second).toMatchObject({ jobId: first.jobId, status: "queued", existing: true });
-    expect(await redis.xLen(redisKeys.writebackJobs)).toBe(1);
+    expect(await queuedEntries(first.jobId)).toHaveLength(1);
     expect(await redis.hGet(redisKeys.writebackJob(first.jobId), "answer")).toBe("winner");
   });
 
@@ -66,8 +81,7 @@ describe("writeback queue", () => {
 
     expect(retried).toMatchObject({ jobId: first.jobId, status: "queued", existing: false });
     expect(await redis.hGetAll(jobKey)).toMatchObject({ status: "queued", attempt: "0", errorCode: "", answer: "winner" });
-    const queuedEntries = ((await redis.xRange(redisKeys.writebackJobs, "-", "+")) ?? []).filter((entry) => entry.message.jobId === first.jobId);
-    expect(queuedEntries).toHaveLength(2);
+    expect(await queuedEntries(first.jobId)).toHaveLength(2);
     const events = ((await redis.xRange(redisKeys.activityEvents(activityId), "-", "+")) ?? []).map((entry) => JSON.parse(entry.message.payload) as { type: string; data: { status: string } });
     expect(events.filter((event) => event.type === "writeback.status" && event.data.status === "queued")).toHaveLength(2);
   });
@@ -76,6 +90,6 @@ describe("writeback queue", () => {
     await redis.hSet(redisKeys.round(roundId), "winnerGroupId", "");
 
     await expect(enqueueWriteback(activityId, roundId, teacherId)).rejects.toMatchObject({ status: 409 });
-    expect(await redis.xLen(redisKeys.writebackJobs)).toBe(0);
+    expect(await queuedEntries(`${activityId}:${roundId}`)).toHaveLength(0);
   });
 });

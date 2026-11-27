@@ -1,4 +1,4 @@
-import type { ActivityRoundSnapshot, ActivitySubmissionSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
+import type { ActivityRoundSnapshot, ActivitySubmissionSnapshot, AdoptedAnswerSnapshot, PublishedAnswerSnapshot, RoundBlankSnapshot } from "@/features/activities/domain/snapshot";
 
 /**
  * Pure helpers that apply live activity events to the list of rounds kept by the teacher and
@@ -115,15 +115,28 @@ export function applyRoundClosed(rounds: ActivityRoundSnapshot[], data: RoundClo
   }));
 }
 
+/**
+ * Applies a writeback status. Only queued events carry the adopted answer, so later statuses keep
+ * it; a succeeded event also carries the answer now published to students (005).
+ */
 export function applyWritebackStatus(
   rounds: ActivityRoundSnapshot[],
   roundId: string,
-  job: { jobId: string; status: string; attempt?: number; errorCode?: string | null },
+  job: { jobId: string; status: string; attempt?: number; errorCode?: string | null; adopted?: AdoptedAnswerSnapshot; published?: PublishedAnswerSnapshot },
 ): ActivityRoundSnapshot[] {
-  return updateRound(rounds, roundId, (round) => ({
-    ...round,
-    writebackJob: { jobId: job.jobId, status: job.status, attempt: job.attempt ?? 0, errorCode: job.errorCode ?? null },
-  }));
+  return updateRound(rounds, roundId, (round) => {
+    const adopted = job.adopted ?? round.writebackJob?.adopted;
+    return {
+      ...round,
+      writebackJob: { jobId: job.jobId, status: job.status, attempt: job.attempt ?? 0, errorCode: job.errorCode ?? null, ...(adopted ? { adopted } : {}) },
+      ...(job.published ? { publishedAnswer: job.published } : {}),
+    };
+  });
+}
+
+/** The answer the teacher adopted, published to students once its writeback succeeded (005). */
+export function applyPublishedAnswer(rounds: ActivityRoundSnapshot[], roundId: string, published: PublishedAnswerSnapshot): ActivityRoundSnapshot[] {
+  return updateRound(rounds, roundId, (round) => ({ ...round, publishedAnswer: published }));
 }
 
 /** Card status of a question on the teacher board. */

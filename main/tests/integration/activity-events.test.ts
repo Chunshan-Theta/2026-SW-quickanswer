@@ -71,12 +71,15 @@ describe("activity SSE privacy and reconnect snapshots", () => {
     expect(snapshot.rounds[0]).toMatchObject({ winnerGroupId: "Red", closedAt: "t3" });
   });
 
-  it("shows a student only their own answer in open rounds but every answer in closed rounds", async () => {
+  it("shows a student only their own answer in open and closed rounds (005)", async () => {
     const snapshot = JSON.parse(await readSnapshot("student", "Blue"));
     expect(snapshot.rounds[1].submissions).toEqual([
       { groupId: "Blue", answer: "blue answer", acceptedOrder: 1, acceptedAt: "t1" },
     ]);
     expect(JSON.stringify(snapshot)).not.toContain("red answer");
-    expect(snapshot.rounds[0].submissions.map((submission: { answer: string }) => submission.answer)).toEqual(["red earlier", "blue earlier"]);
+    // Closed rounds no longer reveal other groups or the fastest group to students.
+    expect(snapshot.rounds[0]).toMatchObject({ phase: "closed", winnerGroupId: null });
+    expect(snapshot.rounds[0].submissions.map((submission: { answer: string }) => submission.answer)).toEqual(["blue earlier"]);
+    expect(JSON.stringify(snapshot)).not.toContain("red earlier");
   });
 });

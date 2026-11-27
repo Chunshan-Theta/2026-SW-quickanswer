@@ -137,6 +137,28 @@ describe("Guided Notes writeback (002)", () => {
     await expect(prepareGuidedNotesWriteback(markerActivity, "1", ["=1+1"])).resolves.toMatchObject({ alreadyWritten: true });
   });
 
+  it("overwrites a marker cell that holds the previously published answer when the teacher re-selects (005)", async () => {
+    const markerGrid: WorksheetGrid = {
+      sheetId: 7,
+      title: "Notes",
+      rows: [{ values: [{ formattedValue: "1. Prompt" }, { formattedValue: "{{answer:1}}" }] }],
+    };
+    const markerActivity = activityFor(markerGrid);
+    const afterFirst = withCells(markerGrid, { B1: "wrong" });
+    mocks.readWorksheet.mockResolvedValueOnce(afterFirst).mockResolvedValueOnce(withCells(markerGrid, { B1: "right" }));
+
+    const prepared = await prepareGuidedNotesWriteback(markerActivity, "1", ["right"], ["wrong"]);
+    if (prepared.alreadyWritten) throw new Error("Expected an unapplied writeback.");
+    await applyGuidedNotesWriteback(markerActivity, prepared);
+    expect(mocks.writeWorksheetAnswers).toHaveBeenCalledWith("teacher-1", "sheet-1", "Notes", [
+      { location: { sheetId: 7, rowIndex: 0, columnIndex: 1 }, answer: "right" },
+    ]);
+
+    // Content the app did not write still fails closed.
+    mocks.readWorksheet.mockResolvedValue(withCells(markerGrid, { B1: "edited by hand" }));
+    await expect(prepareGuidedNotesWriteback(markerActivity, "1", ["right"], ["wrong"])).rejects.toMatchObject({ status: 409 });
+  });
+
   it("reports revoked Google access without attempting a write", async () => {
     mocks.readWorksheet.mockRejectedValue(new AppError(403, "FORBIDDEN", "Google access revoked"));
 

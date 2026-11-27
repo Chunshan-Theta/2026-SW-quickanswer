@@ -37,6 +37,13 @@ export function jobAnswers(job: Pick<WritebackJob, "answer" | "answers">): strin
   return [job.answer];
 }
 
+/** 005: what the last successful writeback left in the cells, so a re-selected answer can replace it. */
+export function jobPreviousAnswers(job: Pick<WritebackJob, "previousAnswers">): string[] {
+  if (!job.previousAnswers) return [];
+  const parsed: unknown = JSON.parse(job.previousAnswers);
+  return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : [];
+}
+
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -56,7 +63,7 @@ export async function processWritebackEntry(
     const rawActivity = await redis.get(redisKeys.activity(job.activityId));
     if (!rawActivity) throw new AppError(404, errorCodes.notFound, "找不到課堂活動。");
     const activity = JSON.parse(rawActivity) as ImportedActivity;
-    const prepared = await prepareGuidedNotesWriteback(activity, job.questionNumber, jobAnswers(job));
+    const prepared = await prepareGuidedNotesWriteback(activity, job.questionNumber, jobAnswers(job), jobPreviousAnswers(job));
     if (!prepared.alreadyWritten) {
       await applyGuidedNotesWriteback(activity, prepared);
     }
