@@ -7,6 +7,7 @@ local activityRaw = redis.call("GET", KEYS[1])
 if not activityRaw then return cjson.encode({ error = "NOT_FOUND" }) end
 local activity = cjson.decode(activityRaw)
 if activity.teacherId ~= ARGV[1] then return cjson.encode({ error = "FORBIDDEN" }) end
+if activity.phase == "ended" then return cjson.encode({ error = "ACTIVITY_ENDED" }) end
 if activity.phase ~= "ready" and activity.phase ~= "active" then return cjson.encode({ error = "CONFLICT" }) end
 
 local ok, requested = pcall(cjson.decode, ARGV[4])

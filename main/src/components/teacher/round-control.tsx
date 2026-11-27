@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Clipboard, LoaderCircle, RadioTower, Square } from "lucide-react";
 import { SubmissionAnswer } from "@/components/shared/submission-answer";
+import { CloseRoomControl, type ClosedActivityResult } from "@/components/teacher/close-room-control";
+import { isActivityEnded, phaseAfterRoundsClosed } from "@/features/activities/domain/activity-lifecycle";
 import { AnswerAdoptionPanel } from "@/components/teacher/answer-adoption";
 import type { AdoptionSelection } from "@/features/activities/domain/answer-adoption";
 import {
@@ -24,6 +26,7 @@ type ActivityView = {
   activityId: string;
   joinCode: string;
   phase: string;
+  endedAt?: string | null;
   groupNames: string[];
   completedQuestionNumbers: string[];
   questions: Question[];
@@ -57,9 +60,9 @@ async function postJson<T>(url: string, body?: unknown): Promise<T> {
   return result;
 }
 
-/** Mirrors the server rule: the activity completes once every question has a closed round. */
-function activityPhase(questions: Question[], rounds: ActivityRoundSnapshot[]): string {
-  return rounds.filter((round) => round.phase === "closed").length >= questions.length ? "completed" : "active";
+/** Mirrors the server rule: completed once every question has a closed round; ended stays ended. */
+function activityPhase(currentPhase: string, questions: Question[], rounds: ActivityRoundSnapshot[]): string {
+  return phaseAfterRoundsClosed(currentPhase, questions.length, rounds.filter((round) => round.phase === "closed").length);
 }
 
 function questionBlanks(question: Question): RoundBlankSnapshot[] {
@@ -77,7 +80,9 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
   const roundIndex = useMemo(() => roundsByQuestion(activity.rounds), [activity.rounds]);
   const statuses = new Map(activity.questions.map((question) => [question.questionNumber, questionStatus(question, roundIndex.get(question.questionNumber))]));
   const completed = activity.phase === "completed";
-  const openableNumbers = completed ? [] : activity.questions.filter((question) => statuses.get(question.questionNumber) === "idle").map((question) => question.questionNumber);
+  // A closed room (006) is read-only for opening/closing questions; results and writeback remain.
+  const ended = isActivityEnded(activity.phase);
+  const openableNumbers = completed || ended ? [] : activity.questions.filter((question) => statuses.get(question.questionNumber) === "idle").map((question) => question.questionNumber);
   // A question that stopped being openable (e.g. opened from another window) drops out of the selection.
   const selectedNumbers = openableNumbers.filter((questionNumber) => selected.has(questionNumber));
   const openCount = activity.rounds.filter((round) => round.phase === "open").length;
@@ -88,7 +93,7 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
     const stream = new EventSource(`/api/activities/${activity.activityId}/events`);
     stream.addEventListener("activity.snapshot", (message) => {
       const snapshot = JSON.parse((message as MessageEvent<string>).data) as ActivitySnapshot;
-      setActivity((current) => ({ ...current, phase: snapshot.phase, rounds: snapshot.rounds }));
+      setActivity((current) => ({ ...current, phase: snapshot.phase, endedAt: snapshot.endedAt ?? null, rounds: snapshot.rounds }));
     });
     stream.addEventListener("phase.changed", (message) => {
       const event = readEvent<RoundOpenedData & { phase: string }>(message);
@@ -103,8 +108,12 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
       const event = readEvent<ClosedRoundResult>(message);
       setActivity((current) => {
         const rounds = applyRoundClosed(current.rounds, { ...event.data, closedAt: event.occurredAt });
-        return { ...current, rounds, phase: activityPhase(current.questions, rounds) };
+        return { ...current, rounds, phase: activityPhase(current.phase, current.questions, rounds) };
       });
+    });
+    stream.addEventListener("activity.ended", (message) => {
+      const event = readEvent<{ phase: "ended"; endedAt: string }>(message);
+      setActivity((current) => ({ ...current, phase: "ended", endedAt: event.data.endedAt }));
     });
     stream.addEventListener("writeback.status", (message) => {
       const event = readEvent<WritebackJobData>(message);
@@ -153,8 +162,13 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
   function applyClosed(results: ClosedRoundResult[]) {
     setActivity((current) => {
       const rounds = results.reduce(applyRoundClosed, current.rounds);
-      return { ...current, rounds, phase: activityPhase(current.questions, rounds) };
+      return { ...current, rounds, phase: activityPhase(current.phase, current.questions, rounds) };
     });
+  }
+
+  function applyActivityClosed(result: ClosedActivityResult) {
+    setActivity((current) => ({ ...current, rounds: result.rounds.reduce(applyRoundClosed, current.rounds), phase: "ended", endedAt: result.endedAt }));
+    setSelected(new Set());
   }
 
   const closeOne = (round: ActivityRoundSnapshot) => run(`close:${round.roundId}`, async () => {
@@ -188,13 +202,14 @@ export function TeacherRoundControl({ activity: initialActivity }: { activity: A
       <section className="join-code-panel">
         <div><p className="eyebrow">STUDENT JOIN CODE</p><p className="join-code-value">{activity.joinCode}</p><small>學生輸入此代碼後選擇組別加入</small></div>
         <button className="secondary-action" type="button" onClick={copyJoinCode}>{copied ? <Check size={15} /> : <Clipboard size={15} />}{copied ? "已複製" : "複製代碼"}</button>
+        <CloseRoomControl activityId={activity.activityId} ended={ended} openCount={openCount} disabled={busy} onClosed={applyActivityClosed} />
       </section>
 
       <section className="question-board" aria-labelledby="question-board-title">
         <div className="question-board-toolbar">
           <div className="question-board-summary">
             <h2 id="question-board-title">題目控制</h2>
-            <span aria-live="polite">{completed ? "活動已完成" : `已選 ${selectedNumbers.length} 題 · 搶答中 ${openCount} 題`}</span>
+            <span aria-live="polite">{ended ? "房間已關閉 · 可查看結果與回填" : completed ? "活動已完成" : `已選 ${selectedNumbers.length} 題 · 搶答中 ${openCount} 題`}</span>
           </div>
           <div className="question-board-actions">
             <button className="secondary-action" disabled={busy || openableNumbers.length === 0} type="button" onClick={toggleAll}>

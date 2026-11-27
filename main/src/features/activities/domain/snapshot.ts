@@ -58,6 +58,8 @@ export interface ActivityRoundSnapshot {
 export interface ActivitySnapshot {
   activityId: string;
   phase: string;
+  /** Set once the teacher closed the room (phase "ended", 006). */
+  endedAt?: string;
   stateVersion: number;
   /** Every round of the activity (open and closed), sorted by question number. */
   rounds: ActivityRoundSnapshot[];

@@ -67,4 +67,17 @@ pnpm exec vitest run tests/unit tests/contract tests/security tests/architecture
 | Vitest（unit、contract、security、architecture、integration、load） | ✅ 33 files / 205 tests |
 | SSR smoke（私用 port 3015、seeded Redis）：教師端單選清單與預設最快組別、回填按鈕、無下拉選單；學生端只見自己答案、等待公布、無他組答案與最快組別；公布後顯示「老師採用：組別」／「老師提供」 | ✅ 15/15 |
 | e2e（`tests/e2e/sheets-writeback.spec.ts` 新增 3 個 005 情境並更新既有斷言） | ⚪ 已更新；本機未安裝 Playwright 瀏覽器，未執行 |
-| 人工驗證 A–D（真實 Google Sheets） | ⚪ 待合併後於 port 3000 執行 |
+| 人工驗證（真實 Google Sheets，見下節） | ✅ 2026-11-25 與 006 整合後於 port 3000 執行 |
+
+## Manual verification results (2026-11-25, integrated with 006)
+
+環境：本機 port 3000 dev server＋worker＋Docker Redis，真實 Google 帳戶與「題組_範例」複本；教師使用瀏覽器，teamA、teamB 以各自 seat（curl）作答，另以瀏覽器分頁檢視 teamA 學生畫面。
+
+| 情境 | 結果 |
+|---|---|
+| 第 1 題（題組）teamA 最快但答錯（GPU／瀏覽器），teamB 第二答對（CPU／作業系統）；結束第 1 題 | ✅ 教師端列出兩組答案，teamA 標「最快」並預設選取，另有「自行輸入正確答案」 |
+| 結束後、回填前學生端 | ✅ 兩組都只看到自己的答案，`winnerGroupId` 為 null，沒有公布答案 |
+| 送出答案的回應 | ✅ 不含 `winnerGroupId` |
+| 改選 teamB →「回填所選答案」 | ✅ worker 成功；teamB 標「已採用」，顯示「已回填：teamB 的答案」 |
+| 回填成功後學生端 | ✅ teamA 畫面：「你們的答案 · 第 1 個送出：GPU／瀏覽器」與「正確答案（老師採用：teamB）：CPU／作業系統」，即時更新 |
+| 第 3 題在房間關閉（006）後改用「自行輸入正確答案」回填 | ✅ 顯示「已回填：老師提供的答案」；學生端即時顯示「正確答案（老師提供）」 |

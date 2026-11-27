@@ -4,7 +4,14 @@ const mocks = vi.hoisted(() => ({ getRequestSession: vi.fn(), readWorksheet: vi.
 
 vi.mock("@/server/auth/session", () => ({ getRequestSession: mocks.getRequestSession }));
 vi.mock("@/features/sheets/google-sheets.adapter", () => ({ readWorksheet: mocks.readWorksheet }));
-vi.mock("@/server/redis/client", () => ({ getRedisClient: async () => ({ set: mocks.set, del: vi.fn() }) }));
+vi.mock("@/server/redis/client", () => {
+  // Import writes the activity and the teacher's activity index in one MULTI (006).
+  const multi = () => {
+    const transaction = { set: () => transaction, zAdd: () => transaction, expire: () => transaction, exec: async () => ["OK", 1, 1] };
+    return transaction;
+  };
+  return { getRedisClient: async () => ({ set: mocks.set, del: vi.fn(), multi }) };
+});
 
 import { POST } from "@/app/api/activities/import/route";
 import { gridFromA1, groupTemplateGrid } from "../fixtures/guided-notes-templates";

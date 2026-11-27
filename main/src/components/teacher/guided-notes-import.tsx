@@ -164,6 +164,8 @@ export function TeacherGuidedNotesImport() {
           spreadsheetId: spreadsheetIdFromInput(spreadsheet),
           sheetId: Number(sheetId),
           groupNames: groups.split(",").map((group) => group.trim()).filter(Boolean),
+          // Shown in 「我的課堂活動」 so the teacher can recognise the activity later.
+          ...(spreadsheetName.trim() ? { spreadsheetTitle: spreadsheetName.trim().slice(0, 200) } : {}),
         }),
       });
       const body = await response.json() as ImportResult & ApiError;

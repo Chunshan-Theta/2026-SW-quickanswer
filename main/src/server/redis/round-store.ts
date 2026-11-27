@@ -11,6 +11,7 @@ export type RoundBlank = { label: string | null; prompt: string };
 export type RoundSubmission = { groupId: string; answer: string; answers?: string[]; acceptedOrder: number; acceptedAt: string };
 export type OpenedRound = { roundId: string; questionNumber: string; prompt: string; kind: "single" | "group"; blanks: RoundBlank[]; phase: "open"; openedAt: string; stateVersion: number };
 export type ClosedRound = { phase: "closed"; roundId: string; questionNumber: string; winnerGroupId: string | null; submissions: RoundSubmission[]; closedAt: string; stateVersion: number };
+export type ClosedActivity = { phase: "ended"; endedAt: string | null; rounds: ClosedRound[]; stateVersion: number; alreadyEnded: boolean };
 
 const ttlSeconds = () => Number(process.env.ACTIVITY_TTL_SECONDS) || 604800;
 const scriptCache = new Map<string, Promise<string>>();
@@ -38,6 +39,9 @@ const scriptErrors: Record<string, ScriptError> = {
   DUPLICATE_SUBMISSION: { status: 409, message: () => "此組已提交答案。" },
   NO_OPEN_ROUNDS: { status: 409, message: () => "目前沒有開放中的題目。" },
   CONFLICT: { status: 409, message: () => "活動目前無法開放題目。" },
+  ACTIVITY_ENDED: { status: 409, message: () => "活動已關閉，無法再開放題目。" },
+  ACTIVITY_ENDED_SUBMIT: { status: 409, message: () => "活動已關閉，無法再作答。" },
+  STALE_OPEN_ROUNDS: { status: 409, message: () => "活動狀態變更中，請重試。" },
   ROUND_CLOSED: { status: 409, message: () => "此搶答回合已結束。" },
 };
 
@@ -73,7 +77,7 @@ export async function submitAnswer(activityId: string, roundId: string, groupId:
   return decodeResult<{ groupId: string; answer: string; answers: string[]; acceptedOrder: number; acceptedAt: string; winnerGroupId: string; stateVersion: number }>(String(raw));
 }
 
-async function closeRounds(activityId: string, teacherId: string, roundIds: string[], mode: "strict" | "open-only") {
+async function evalCloseRounds(activityId: string, teacherId: string, roundIds: string[], mode: "strict" | "open-only" | "end-activity"): Promise<string> {
   const redis = await getRedisClient();
   const raw = await redis.eval(await script("close-rounds.lua"), {
     keys: [
@@ -83,7 +87,23 @@ async function closeRounds(activityId: string, teacherId: string, roundIds: stri
     ],
     arguments: [teacherId, new Date().toISOString(), String(ttlSeconds()), mode, ...roundIds],
   });
-  return decodeResult<{ rounds: ClosedRound[]; stateVersion: number }>(String(raw));
+  return String(raw);
+}
+
+async function closeRounds(activityId: string, teacherId: string, roundIds: string[], mode: "strict" | "open-only") {
+  return decodeResult<{ rounds: ClosedRound[]; stateVersion: number }>(await evalCloseRounds(activityId, teacherId, roundIds, mode));
+}
+
+/** Open round ids of the activity, after checking that it exists and belongs to the teacher. */
+async function readOpenRoundIds(activityId: string, teacherId: string): Promise<string[]> {
+  const redis = await getRedisClient();
+  const raw = await redis.get(redisKeys.activity(activityId));
+  if (!raw) throw scriptFailure("NOT_FOUND");
+  const activity = JSON.parse(raw) as { teacherId?: string; openRoundIdsByQuestion?: unknown };
+  if (activity.teacherId !== teacherId) throw scriptFailure("FORBIDDEN");
+  return activity.openRoundIdsByQuestion && typeof activity.openRoundIdsByQuestion === "object" && !Array.isArray(activity.openRoundIdsByQuestion)
+    ? Object.values(activity.openRoundIdsByQuestion as Record<string, string>)
+    : [];
 }
 
 /** Closes one open round; other open rounds are not affected. */
@@ -96,14 +116,20 @@ export async function closeRound(activityId: string, roundId: string, teacherId:
  * script can declare its keys; the script re-checks each round and skips any closed meanwhile.
  */
 export async function closeAllOpenRounds(activityId: string, teacherId: string) {
-  const redis = await getRedisClient();
-  const raw = await redis.get(redisKeys.activity(activityId));
-  if (!raw) throw scriptFailure("NOT_FOUND");
-  const activity = JSON.parse(raw) as { teacherId?: string; openRoundIdsByQuestion?: unknown };
-  if (activity.teacherId !== teacherId) throw scriptFailure("FORBIDDEN");
-  const openRoundIds = activity.openRoundIdsByQuestion && typeof activity.openRoundIdsByQuestion === "object" && !Array.isArray(activity.openRoundIdsByQuestion)
-    ? Object.values(activity.openRoundIdsByQuestion as Record<string, string>)
-    : [];
+  const openRoundIds = await readOpenRoundIds(activityId, teacherId);
   if (openRoundIds.length === 0) throw scriptFailure("NO_OPEN_ROUNDS");
   return closeRounds(activityId, teacherId, openRoundIds, "open-only");
+}
+
+/**
+ * 關閉房間 (006): closes every open round and ends the activity in one script. Idempotent for an
+ * ended activity. If a question is opened between reading the open set and the script, the script
+ * writes nothing and reports STALE_OPEN_ROUNDS; the read is repeated a few times.
+ */
+export async function closeActivity(activityId: string, teacherId: string): Promise<ClosedActivity> {
+  for (let attempt = 1; ; attempt += 1) {
+    const raw = await evalCloseRounds(activityId, teacherId, await readOpenRoundIds(activityId, teacherId), "end-activity");
+    const stale = (JSON.parse(raw) as { error?: string }).error === "STALE_OPEN_ROUNDS";
+    if (!stale || attempt >= 3) return decodeResult<ClosedActivity>(raw);
+  }
 }

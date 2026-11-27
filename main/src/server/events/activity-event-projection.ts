@@ -14,6 +14,8 @@ export function projectActivityEvent<T extends Record<string, unknown>>(
   session: SessionClaims,
 ): ActivityEvent | null {
   if (session.role === "teacher") return event;
+  // 關閉房間 (006) carries no answers; every student must see it right away.
+  if (event.type === "activity.ended") return event;
   if (event.type === "phase.changed") return event;
 
   if (event.type === "results.finalized") {

@@ -4,7 +4,11 @@ export const activityImportSchema = z.object({
   spreadsheetId: z.string().trim().min(1).max(256),
   sheetId: z.number().int().nonnegative(),
   groupNames: z.array(z.string().trim().min(1).max(48)).min(2).max(32),
-}).refine((value) => new Set(value.groupNames).size === value.groupNames.length, { message: "組別名稱不得重複。", path: ["groupNames"] });
+  /** Google Picker file name, shown in 「我的課堂活動」 only (006). */
+  spreadsheetTitle: z.string().trim().max(200).optional(),
+}).refine((value) => new Set(value.groupNames).size === value.groupNames.length, { message: "組別名稱不得重複。", path: ["groupNames"] })
+  // An empty title is dropped rather than stored as "".
+  .transform(({ spreadsheetTitle, ...rest }): typeof rest & { spreadsheetTitle?: string } => (spreadsheetTitle ? { ...rest, spreadsheetTitle } : rest));
 
 export const mappingConfirmationSchema = z.object({
   resolutions: z

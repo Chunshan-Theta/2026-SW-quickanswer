@@ -74,13 +74,13 @@ else Questions valid
   QuizFlow --> API : Final result
   ActivitySync -> Redis : Read results.finalized event
   ActivitySync --> TeacherUI : Live result and final order
-  ActivitySync --> StudentA : Closed phase and final results
-  ActivitySync --> StudentB : Closed phase and final results
+  ActivitySync --> StudentA : Closed phase and its own answer only
+  ActivitySync --> StudentB : Closed phase and its own answer only
 
   opt Teacher writes results back
-    Teacher -> TeacherUI : Request writeback after close
-    TeacherUI -> API : POST writeback
-    API -> Redis : XADD idempotent writeback job
+    Teacher -> TeacherUI : Adopt one group's answer or type the correct answer
+    TeacherUI -> API : POST writeback { selection }
+    API -> Redis : XADD writeback job (same selection is idempotent, a new one re-queues)
     Redis --> API : Job queued (a failed job may be re-queued)
     API --> TeacherUI : 202 queued
     Worker -> Redis : XREADGROUP pending jobs
@@ -89,12 +89,25 @@ else Questions valid
     Sheet --> SheetsAccess : Write result
     SheetsAccess --> Worker : Verified writeback
     Worker -> Redis : XACK job and XADD status event
+    Worker -> Redis : On success: publish the adopted answer on the round
     ActivitySync -> Redis : Read writeback.status event
     ActivitySync --> TeacherUI : Final writeback status
+    ActivitySync --> StudentA : answer.published (adopted answer + group or 老師提供)
+    ActivitySync --> StudentB : answer.published (adopted answer + group or 老師提供)
     note over Worker, Redis
       On worker crash, XAUTOCLAIM reclaims
       idle pending jobs; idempotency prevents duplicate writes.
     end note
+  end
+
+  opt Teacher closes the room
+    Teacher -> TeacherUI : 關閉房間 (in-page confirm)
+    TeacherUI -> API : POST close
+    API -> QuizFlow : Validate owner
+    QuizFlow -> Redis : Lua: close every open round + phase ended + XADD activity.ended
+    ActivitySync --> TeacherUI : Board read-only (writeback still allowed)
+    ActivitySync --> StudentA : activity.ended (活動已結束)
+    ActivitySync --> StudentB : activity.ended (活動已結束)
   end
 end
 

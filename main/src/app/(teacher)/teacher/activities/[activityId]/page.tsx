@@ -30,7 +30,8 @@ export default async function TeacherActivityPage({ params }: { params: Promise<
           <span className="connection"><i />教師已登入</span>
         </header>
         <div className="content-wrap">
-          <Link className="back-link" href="/teacher/import"><ArrowLeft size={15} />返回匯入</Link>
+          {/* The workspace lists every activity of this teacher, so leaving the console is never a dead end (006). */}
+          <Link className="back-link" href="/teacher/import"><ArrowLeft size={15} />返回教師工作區</Link>
           <div className="page-heading">
             <div>
               <p className="eyebrow">LIVE CLASSROOM / TEACHER</p>

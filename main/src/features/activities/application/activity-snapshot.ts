@@ -18,6 +18,7 @@ type ActivityRecord = {
   activityId: string;
   teacherId: string;
   phase: string;
+  endedAt?: string;
   stateVersion?: number;
   groupNames?: string[];
   roundIdsByQuestion?: unknown;
@@ -86,6 +87,7 @@ export async function getActivitySnapshot(activityId: string, session: SessionCl
   return {
     activityId,
     phase: activity.phase,
+    ...(activity.endedAt ? { endedAt: activity.endedAt } : {}),
     stateVersion: activity.stateVersion ?? 0,
     rounds: sortRounds(rounds),
   };

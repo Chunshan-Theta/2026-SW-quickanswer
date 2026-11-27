@@ -1,6 +1,8 @@
 local activityRaw = redis.call("GET", KEYS[1])
 if not activityRaw then return cjson.encode({ error = "NOT_FOUND" }) end
 local activity = cjson.decode(activityRaw)
+-- A closed room (006) accepts nothing, even from a page that has not noticed yet.
+if activity.phase == "ended" then return cjson.encode({ error = "ACTIVITY_ENDED_SUBMIT" }) end
 local roundPhase = redis.call("HGET", KEYS[2], "phase")
 -- Several questions may be open at once; the round must be the open round of its question
 -- in this activity (which also rejects round ids that belong to another activity).

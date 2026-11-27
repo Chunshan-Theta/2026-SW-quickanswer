@@ -8,9 +8,11 @@ class Group {
   groupName
 }
 class Activity {
-  phase
+  phase : ready | active | completed | ended
   stateVersion
   openRoundIdsByQuestion
+  createdAt
+  endedAt
 }
 class Question {
   questionNumber
@@ -22,6 +24,7 @@ class Round {
   openedAt
   closedAt
   nextOrder
+  publishedAnswer (after a successful writeback)
 }
 class Submission {
   answers[]
@@ -44,9 +47,13 @@ class WritebackJob {
   status
   attempt
   claimedAt
+  adoptedSource : group | teacher
+  adoptedGroupId
+  answers[]
+  revision
 }
 
-Teacher "1" --> "0..*" Activity : controls
+Teacher "1" --> "0..*" Activity : controls (listed in 我的課堂活動 via teacher:{id}:activities)
 Activity "1" *-- "1..*" Question : contains
 Activity "1" *-- "0..*" Round : runs (several may be open at once)
 Round "0..1" --> "1" Question : opens (once per question)
@@ -57,11 +64,13 @@ Question "1" --> "0..*" Submission : answered by
 GuidedNotesSheet "1" --> "1..*" Question : imports by question number
 Question "1" *-- "1..*" AnswerSlot : maps dynamically (one per sub-question)
 Activity "1" --> "0..*" ActivityEvent : appends versioned events
-Round "1" --> "0..1" WritebackJob : writes after close
+Round "1" --> "0..1" WritebackJob : writes the adopted answer after close
 
 note right of Submission
   Rank each group by its first accepted answer.
-  The earliest accepted answer wins the question.
+  The fastest answer is preselected, but the teacher adopts
+  the answer that is written back (any group or a typed answer).
+  Students only ever see their own answer plus the adopted one.
   Order and winner are kept per round, so rounds
   that are open at the same time never affect each other.
 end note

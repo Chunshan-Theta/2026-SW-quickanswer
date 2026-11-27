@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowLeft, ArrowUpRight, Layers3, RadioTower } from "lucide-react";
+import { TeacherActivityList } from "@/components/teacher/activity-list";
 import { TeacherGuidedNotesImport } from "@/components/teacher/guided-notes-import";
+import { listTeacherActivities, type TeacherActivitySummary } from "@/features/activities/application/teacher-activities";
 import { getTeacherServerSession } from "@/server/auth/session";
 
 export const runtime = "nodejs";
@@ -8,6 +10,16 @@ export const runtime = "nodejs";
 export default async function TeacherImportPage() {
   const session = await getTeacherServerSession();
   const isTeacher = session?.role === "teacher";
+  // 「我的課堂活動」 is the way back to a console the teacher left (006); a Redis outage only hides it.
+  let activities: TeacherActivitySummary[] = [];
+  let activitiesUnavailable = false;
+  if (isTeacher) {
+    try {
+      activities = await listTeacherActivities(session.sub);
+    } catch {
+      activitiesUnavailable = true;
+    }
+  }
 
   return (
     <main className="workspace">
@@ -36,7 +48,10 @@ export default async function TeacherImportPage() {
             <span className="date-stamp">單題與題組 · 依標題列動態辨識</span>
           </div>
           {isTeacher ? (
-            <TeacherGuidedNotesImport />
+            <div className="teacher-workspace-sections">
+              <TeacherActivityList activities={activities} unavailable={activitiesUnavailable} />
+              <TeacherGuidedNotesImport />
+            </div>
           ) : (
             <section className="auth-prompt" aria-labelledby="auth-title">
               <div>
